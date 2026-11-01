@@ -19,4 +19,5 @@ Record every run here: date, config, what you expected, what happened, and what 
 
 ## Notes & Issues
 
+- 2026-11-01: Retrieval data ready on AutoDL file storage (`/root/autodl-fs/searchr1`, A800 zone). `e5_Flat.index` = 64,559,075,373 bytes (= part_aa 42,949,672,960 + part_ab 21,609,402,413, both matching HF sizes); `wiki-18.jsonl` = 14,393,579,520 bytes. Downloaded via hf-mirror (`hf download` hit a brotli/httpx `TypeError`; `wget -c` worked). A800 instances can't expand the data disk, hence file storage.
 - 
