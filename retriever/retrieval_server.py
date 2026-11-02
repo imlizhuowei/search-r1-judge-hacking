@@ -83,7 +83,13 @@ class LineCorpus:
 
     def __getitem__(self, i: int) -> dict:
         start, end = int(self.offsets[i]), int(self.offsets[i + 1])
-        return json.loads(os.pread(self.fd, end - start, start))
+        raw = os.pread(self.fd, end - start, start)
+        try:
+            return json.loads(raw)
+        except ValueError:
+            # The upstream wiki-18.jsonl ends with one corrupted record (invalid UTF-8) followed by
+            # NUL bytes; it still has an index vector. Return an empty passage instead of crashing.
+            return {"id": str(i + 1), "contents": ""}
 
 
 def load_corpus(corpus_path: str):
