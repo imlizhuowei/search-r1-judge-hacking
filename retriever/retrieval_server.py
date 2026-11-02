@@ -68,13 +68,15 @@ class LineCorpus:
             except OSError as e:
                 print(f"[corpus] could not save offsets ({e}); will rescan next time", flush=True)
         self.fd = os.open(corpus_path, os.O_RDONLY)
-        # Drop blank trailing lines (e.g. a final empty line), which have no index vector.
+        # Drop junk trailing "lines" that have no index vector: our wiki-18.jsonl ends with a run of
+        # NUL bytes after the last newline (seen 2026-11-02), and some copies end with a blank line.
         while len(self) > 0:
             start, end = int(self.offsets[-2]), int(self.offsets[-1])
-            if os.pread(self.fd, end - start, start).strip():
+            tail = os.pread(self.fd, end - start, start)
+            if tail.strip(b" \t\r\n\x00"):
                 break
             self.offsets = self.offsets[:-1]
-            print("[corpus] dropped a blank trailing line", flush=True)
+            print(f"[corpus] dropped a junk trailing line ({len(tail):,} bytes of whitespace/NUL)", flush=True)
 
     def __len__(self):
         return len(self.offsets) - 1
