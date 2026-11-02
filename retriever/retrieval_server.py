@@ -68,6 +68,13 @@ class LineCorpus:
             except OSError as e:
                 print(f"[corpus] could not save offsets ({e}); will rescan next time", flush=True)
         self.fd = os.open(corpus_path, os.O_RDONLY)
+        # Drop blank trailing lines (e.g. a final empty line), which have no index vector.
+        while len(self) > 0:
+            start, end = int(self.offsets[-2]), int(self.offsets[-1])
+            if os.pread(self.fd, end - start, start).strip():
+                break
+            self.offsets = self.offsets[:-1]
+            print("[corpus] dropped a blank trailing line", flush=True)
 
     def __len__(self):
         return len(self.offsets) - 1
