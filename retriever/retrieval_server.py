@@ -15,10 +15,11 @@
 # limitations under the License.
 # Adapted from https://github.com/PeterGriffinJin/Search-R1/blob/main/search_r1/search/retrieval_server.py
 # Copied from verl (removed upstream in May 2026). Local changes: CPU fallback for the query
-# encoder (fp16 only on GPU), --port flag.
+# encoder (fp16 only on GPU), --port flag, line-offset corpus reader instead of datasets/Arrow.
 
 import argparse
 import json
+import os
 import warnings
 from typing import Optional
 
@@ -35,9 +36,49 @@ from transformers import AutoModel, AutoTokenizer
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+class LineCorpus:
+    """Random access to a JSONL corpus by line number, without loading it into RAM.
+
+    Replaces datasets.load_dataset("json", ...), which converts the 14GB wiki-18 corpus into a
+    15-20GB Arrow cache (too big for our 50GB data disk). We scan the file once to record the
+    byte offset of every line, cache the offsets as .npy, and read single lines with os.pread
+    (thread-safe, no shared file position).
+    """
+
+    def __init__(self, corpus_path: str, offsets_path: Optional[str] = None):
+        self.corpus_path = corpus_path
+        offsets_path = offsets_path or os.environ.get(
+            "CORPUS_OFFSETS", os.path.join(os.path.dirname(os.path.abspath(corpus_path)), "wiki-18.offsets.npy")
+        )
+        if os.path.exists(offsets_path):
+            self.offsets = np.load(offsets_path)
+            print(f"[corpus] loaded {len(self) :,} line offsets from {offsets_path}", flush=True)
+        else:
+            print(f"[corpus] scanning {corpus_path} for line offsets (one-time, a few minutes)...", flush=True)
+            offs = [0]
+            with open(corpus_path, "rb") as f:
+                for i, line in enumerate(f, 1):
+                    offs.append(offs[-1] + len(line))
+                    if i % 2_000_000 == 0:
+                        print(f"[corpus]   {i:,} lines", flush=True)
+            self.offsets = np.asarray(offs, dtype=np.int64)
+            try:
+                np.save(offsets_path, self.offsets)
+                print(f"[corpus] saved offsets to {offsets_path}", flush=True)
+            except OSError as e:
+                print(f"[corpus] could not save offsets ({e}); will rescan next time", flush=True)
+        self.fd = os.open(corpus_path, os.O_RDONLY)
+
+    def __len__(self):
+        return len(self.offsets) - 1
+
+    def __getitem__(self, i: int) -> dict:
+        start, end = int(self.offsets[i]), int(self.offsets[i + 1])
+        return json.loads(os.pread(self.fd, end - start, start))
+
+
 def load_corpus(corpus_path: str):
-    corpus = datasets.load_dataset("json", data_files=corpus_path, split="train", num_proc=4)
-    return corpus
+    return LineCorpus(corpus_path)
 
 
 def load_docs(corpus, doc_idxs):
@@ -210,14 +251,18 @@ class BM25Retriever(BaseRetriever):
 class DenseRetriever(BaseRetriever):
     def __init__(self, config):
         super().__init__(config)
+        # Load the corpus first so problems with it show up before the slow index read.
+        self.corpus = load_corpus(self.corpus_path)
+        print(f"[index] reading {self.index_path} into RAM (64GB, can take 10-20 min)...", flush=True)
         self.index = faiss.read_index(self.index_path)
+        print(f"[index] loaded {self.index.ntotal:,} vectors", flush=True)
+        assert len(self.corpus) == self.index.ntotal, f"corpus lines {len(self.corpus)} != index size {self.index.ntotal}"
         if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
             co.useFloat16 = True
             co.shard = True
             self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
 
-        self.corpus = load_corpus(self.corpus_path)
         self.encoder = Encoder(
             model_name=self.retrieval_method,
             model_path=config.retrieval_model_path,

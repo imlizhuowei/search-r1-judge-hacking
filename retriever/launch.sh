@@ -5,7 +5,7 @@ set -euo pipefail
 DATA=${DATA:-/root/autodl-fs/searchr1}
 MODEL=${MODEL:-/root/autodl-tmp/models/e5-base-v2}
 # Keep the datasets/Arrow cache off the 30GB system disk.
-export HF_DATASETS_CACHE=${HF_DATASETS_CACHE:-/root/autodl-tmp/hf_cache/datasets}
+# (corpus is read line-by-line via cached byte offsets; no datasets/Arrow cache needed)
 export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
 python "$(dirname "$0")/retrieval_server.py" \
   --index_path "$DATA/e5_Flat.index" \
