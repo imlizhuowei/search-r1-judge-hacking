@@ -19,12 +19,18 @@ print("lines in offsets:", n, "| file size:", os.path.getsize(os.path.join(d, "w
 last = read(n - 1)
 print("last line:", len(last), "bytes; all NUL/whitespace:", not last.strip(b" \t\r\n\x00"))
 real = n - 1 if not last.strip(b" \t\r\n\x00") else n
-print("last real line:", json.loads(read(real - 1))["id"], "| first:", json.loads(read(0))["id"])
-bad = 0
-random.seed(0)
-for i in random.sample(range(real), 2000):
+
+
+def check(i):
     try:
-        json.loads(read(i))
+        return json.loads(read(i))["id"] == str(i + 1)
     except Exception:
-        bad += 1
-print("random 2000 lines unparseable:", bad)
+        return False
+
+
+print("first line ok:", check(0), "| last real line ok:", check(real - 1))
+for k in range(2, 6):
+    print(f"line {real - k + 1} ok:", check(real - k))
+random.seed(0)
+bad = [i for i in random.sample(range(real), 2000) if not check(i)]
+print("random 2000 lines bad (unparseable or id != line number):", len(bad), bad[:10])
