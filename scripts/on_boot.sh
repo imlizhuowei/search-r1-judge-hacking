@@ -47,8 +47,18 @@ if [ "$MAX_RUN_HOURS" != 0 ]; then
     push "已设置强制关机" "${MAX_RUN_HOURS} 小时后无论如何都会关机"
 fi
 
-# memory monitor (CPU RAM was the bottleneck in the first smoke run)
-setsid nohup bash -c 'while true; do echo "$(date +%H:%M:%S) $(free -g | awk "/Mem:/{print \"used=\"\$3\"G avail=\"\$7\"G\"}") gpu=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader | head -1)"; sleep 60; done' >> /root/autodl-tmp/mem.log 2>&1 < /dev/null &
+# memory monitor. NOTE: `free` inside the container shows the whole host (~1 TB), not our 120 GB limit,
+# so read the container's cgroup instead (v2 first, then v1).
+cat > /root/autodl-tmp/memmon.sh <<'MON'
+while true; do
+  if [ -f /sys/fs/cgroup/memory.current ]; then u=$(cat /sys/fs/cgroup/memory.current); l=$(cat /sys/fs/cgroup/memory.max)
+  else u=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes); l=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes); fi
+  g=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader 2>/dev/null | head -1)
+  echo "$(date +%H:%M:%S) container_used=$((u/1073741824))G limit=$( [ "$l" = max ] && echo max || echo $((l/1073741824))G ) gpu=$g"
+  sleep 60
+done
+MON
+setsid nohup bash /root/autodl-tmp/memmon.sh >> /root/autodl-tmp/mem.log 2>&1 < /dev/null &
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || { push "没有 GPU" "nvidia-smi 失败"; exit 1; }
 command -v uv > /dev/null || { push "找不到 uv" "PATH=$PATH"; exit 1; }
