@@ -75,3 +75,19 @@ def test_rate_limit_backs_off_then_continues(monkeypatch):
     api = make_api([FakeResp({}, status=429), FakeResp({"code": "Success"})])
     g.grab(api, "u", interval=1, bark=None, max_hours=1)
     assert 5 in slept and len(api.calls) == 2
+
+
+def test_status_survives_network_drop(monkeypatch):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    api = g.AutoDL("tok")
+    seq = [ConnectionError("hotspot down"), ConnectionError("still down"),
+           FakeResp({"code": "Success", "data": {"list": [{"uuid": "u", "status": "running"}], "result_total": 1}})]
+
+    def post(url, json=None, timeout=None):
+        x = seq.pop(0)
+        if isinstance(x, Exception):
+            raise x
+        return x
+
+    api.s.post = post
+    assert api.status("u") == "running"

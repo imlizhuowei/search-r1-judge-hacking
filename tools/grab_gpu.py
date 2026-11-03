@@ -85,7 +85,19 @@ class AutoDL:
     def power_on(self, uuid: str) -> None:
         self._post("/api/v1/instance/power_on", {"instance_uuid": uuid}, power_on=True)
 
-    def status(self, uuid: str) -> str | None:
+    def status(self, uuid: str, retries: int = 60) -> str | None:
+        """Retries through network drops (flaky hotspot): up to ~10 min."""
+        for i in range(retries):
+            try:
+                return self._status_once(uuid)
+            except (Fatal, Capacity):
+                raise
+            except Exception as e:
+                print(f"  查询状态失败（网络？）{i + 1}/{retries}: {str(e)[:60]}", flush=True)
+                time.sleep(10)
+        raise Fatal("网络长时间不通，无法确认实例状态")
+
+    def _status_once(self, uuid: str) -> str | None:
         page = 1
         while True:
             data = self._post("/api/v1/instance", {"page_index": page, "page_size": 100, "status": [],
@@ -144,14 +156,15 @@ def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep") -> Non
     # Retry a few times: sshd may need a moment after the container is "running".
     remote = (f"cd /root/autodl-tmp/search-r1-judge-hacking && git pull -q; "
               f"BARK_KEY={bark or ''} AFTER={after} nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 &")
-    for _ in range(12):
+    r = None
+    for _ in range(30):
         r = subprocess.run(ssh_cmd.split() + ["-o", "StrictHostKeyChecking=accept-new",
                                               "-o", "BatchMode=yes", remote], capture_output=True, text=True)
         if r.returncode == 0:
             notify(bark, "任务已在服务器上启动", f"on_boot.sh {job}")
             return
-        time.sleep(10)
-    notify(bark, "SSH 启动任务失败", (r.stderr or "")[:80])
+        time.sleep(20)
+    notify(bark, "SSH 启动任务失败，卡在空转！", "请尽快手动登录运行 on_boot.sh 或关机")
     raise Fatal("ssh failed: " + (r.stderr or "")[:200])
 
 
@@ -182,6 +195,9 @@ def main():
     except Fatal as e:
         notify(a.bark_key, "抢卡脚本停止", str(e))
         sys.exit(1)
+    except Exception as e:  # unexpected crash: the instance may be running and billing
+        notify(a.bark_key, "抢卡脚本崩溃，检查实例是否在空转", str(e)[:80])
+        raise
 
 
 if __name__ == "__main__":
