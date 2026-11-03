@@ -4,7 +4,7 @@ Record every run here: date, config, what you expected, what happened, and what 
 
 | Date | Run | Model | Config / change | Result | Notes |
 |---|---|---|---|---|---|
-| | | | | | |
+| 2026-11-04 00:06 | smoke (GRPO, EM) | Qwen2.5-3B-Instruct | 1×A800, batch 8×n4, max resp 2048, tool_agent multi-turn, 3 steps | **pipeline works end to end**: multi-turn search happens (turns 2–8, mean 5.1), reward mean 0.09→0.05, step 1 = 160 s (warm-up), steps 2–3 ≈ 39 s (gen 24 s, ref 5.7 s, update 4.9 s), ~27k tokens/step, resp len mean ≈ 456 (3% hit 2048) | retriever ready 5.6 min after boot (offset cache reused); CPU mem used 124.8 GB and a DataLoader worker was OOM-killed at exit -> must cut CPU RAM before bigger runs (retriever holds ~64 GB) |
 
 ## Decisions
 
