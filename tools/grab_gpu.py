@@ -36,6 +36,8 @@ CAPACITY_HINTS = ("无空闲", "没有空闲", "暂无空闲", "资源不足", "
 TERMINAL = {"AuthorizeFailed": "登录 token 失效，请重新复制", "TORecharge": "余额不足，请充值",
             "TORealName": "需要实名认证"}
 MIN_INTERVAL = 1.0  # seconds; one request at a time, never concurrent
+REMOTE_REPO = "/root/autodl-tmp/search-r1-judge-hacking"
+REMOTE_LOG = "/root/autodl-tmp/on_boot.log"
 
 
 class Capacity(Exception):
@@ -158,15 +160,17 @@ def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep", max_ru
     AutoDL sessions may stay open after the command finishes (seen with `ssh ... echo ok`), so we do not
     wait for ssh to exit: the remote side prints LAUNCHED once the job is in the background, and we
     stop waiting after 60 s and look for that marker in whatever output arrived."""
-    remote = (f"cd /root/autodl-tmp/search-r1-judge-hacking && git pull -q; "
-              f"BARK_KEY={bark or ''} AFTER={after} MAX_RUN_HOURS={int(max_run_hours)} "
+    remote = (f"cd {REMOTE_REPO} && git pull -q; "
+              f"export BARK_KEY={bark or ''} AFTER={after} MAX_RUN_HOURS={int(max_run_hours)}; "
               f"if [ -f scripts/on_boot.sh ]; then "
-              f"setsid nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 < /dev/null & "
+              f"setsid nohup bash scripts/on_boot.sh {job} > {REMOTE_LOG} 2>&1 < /dev/null & "
               f"echo LAUNCHED; "
               f"else (setsid nohup bash -c 'sleep 600; /usr/bin/shutdown' > /dev/null 2>&1 < /dev/null &); "
               f"echo MISSING_ON_BOOT; fi")
-    cmd = ssh_cmd.split() + ["-n", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes",
-                             "-o", "ConnectTimeout=20", remote]
+    parts = ssh_cmd.split()
+    # options go right after "ssh", before the destination (portable across OpenSSH builds)
+    cmd = [parts[0], "-n", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes",
+           "-o", "ConnectTimeout=20", *parts[1:], remote]
     err = ""
     for _ in range(30):
         try:

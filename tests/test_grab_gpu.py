@@ -126,3 +126,48 @@ def test_launch_missing_on_boot_schedules_shutdown(monkeypatch):
     monkeypatch.setattr(g.subprocess, "run", lambda cmd, **kw: R())
     with pytest.raises(g.Fatal):
         g.launch("ssh -p 1 root@h", "smoke", None)
+
+
+def _capture_remote(monkeypatch, tmp_path):
+    """Run launch() with a fake ssh that executes the remote command in bash, against a fake repo."""
+    import subprocess as sp
+    real_run = sp.run  # keep the real one before monkeypatching (g.subprocess is the same module)
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    monkeypatch.setattr(g, "REMOTE_REPO", str(repo))
+    monkeypatch.setattr(g, "REMOTE_LOG", str(tmp_path / "on_boot.log"))
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    ran = {}
+
+    def fake_run(cmd, **kw):
+        ran["cmd"] = cmd
+        remote = cmd[-1].replace("git pull -q", "true").replace("setsid nohup ", "")
+        return real_run(["bash", "-c", remote], capture_output=True, text=True, timeout=20)
+
+    monkeypatch.setattr(g.subprocess, "run", fake_run)
+    return repo, ran
+
+
+def test_remote_command_really_runs_in_bash(monkeypatch, tmp_path):
+    repo, ran = _capture_remote(monkeypatch, tmp_path)
+    out = tmp_path / "env.txt"
+    (repo / "scripts" / "on_boot.sh").write_text(f'echo "$1 $AFTER $MAX_RUN_HOURS $BARK_KEY" > {out}\n')
+    g.launch("ssh -p 40606 root@h", "smoke", "KEY", after="shutdown", max_run_hours=3)
+    import time as _t
+    for _ in range(50):
+        if out.exists() and out.read_text().strip():
+            break
+        _t.sleep(0.05)
+    assert out.read_text().split() == ["smoke", "shutdown", "3", "KEY"]   # env vars reached on_boot.sh
+    cmd = ran["cmd"]
+    assert cmd[0] == "ssh" and cmd.index("-n") < cmd.index("root@h")      # options before destination
+
+
+def test_remote_command_missing_on_boot(monkeypatch, tmp_path):
+    _capture_remote(monkeypatch, tmp_path)
+    # no on_boot.sh in the fake repo -> MISSING branch; neutralise the scheduled shutdown
+    fake = g.subprocess.run
+    monkeypatch.setattr(g.subprocess, "run",
+                        lambda cmd, **kw: fake(cmd[:-1] + [cmd[-1].replace("/usr/bin/shutdown", "true")], **kw))
+    with pytest.raises(g.Fatal):
+        g.launch("ssh -p 1 root@h", "smoke", None)
