@@ -24,7 +24,7 @@ def test_progress_line(tmp_path):
     p.write_text(LOG)
     line = progress.summarize(str(p), 300)
     assert line.startswith("step 2/300 | reward 0.100 (first 0.050) | val 0.150")
-    assert "4.5 min/step" in line and "ETA 22.4 h"  # 298 steps x 270 s = 22.35 h in line
+    assert "4.5 min/step" in line and "ETA 22.4 h" in line  # 298 steps x 270 s = 22.35 h
 
 
 def test_progress_before_first_step(tmp_path):
