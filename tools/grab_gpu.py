@@ -152,7 +152,7 @@ def main():
     ap.add_argument("--ssh", help='e.g. "ssh -p 12345 root@connect.xxx.seetacloud.com" (key login)')
     ap.add_argument("--job", default="smoke", help="argument passed to scripts/on_boot.sh")
     ap.add_argument("--bark-key", default=os.environ.get("BARK_KEY"))
-    ap.add_argument("--after", default="keep", choices=["keep", "shutdown", "shutdown_always"],
+    ap.add_argument("--after", default="shutdown", choices=["keep", "shutdown", "shutdown_always"],
                     help="when the job ends: keep the GPU / shut down if it succeeded / always shut down")
     a = ap.parse_args()
 

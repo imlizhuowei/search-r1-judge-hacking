@@ -26,6 +26,11 @@ fi
 echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
+STAGES=/root/autodl-tmp/on_boot_stages.txt
+: > "$STAGES"
+mark() { echo "$1 $(date +%s)" >> "$STAGES"; }   # stage timestamps, for cost/time extrapolation
+mark boot
+
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || { push "没有 GPU" "nvidia-smi 失败"; exit 1; }
 git pull -q || true
 bash scripts/apply_verl_patch.sh > /dev/null 2>&1 || true
@@ -43,15 +48,18 @@ for i in $(seq 1 240); do   # wait up to 2 h
 done
 curl -s -m 5 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' -d '{"queries":["test"],"topk":1}' > /dev/null \
     || { push "检索服务没起来" "看 retriever.log"; exit 1; }
-push "检索服务就绪" ""
+mark retriever_ready
+push "检索服务就绪" "开机后 $(( ($(date +%s) - $(head -1 $STAGES | cut -d' ' -f2)) / 60 )) 分钟"
 
 # 2. tool check against the real retriever
 /root/autodl-tmp/verl/.venv/bin/python -m agent.search_tool > /root/autodl-tmp/tool_check.log 2>&1 \
     && grep -q "'status': 'ok'" /root/autodl-tmp/tool_check.log \
     || { push "搜索工具检查失败" "看 tool_check.log"; exit 1; }
+mark tool_ok
 push "搜索工具正常" ""
 
 # 3. job
+mark job_start
 case "$JOB" in
     smoke)     ADV=grpo bash scripts/smoke_train.sh > /root/autodl-tmp/smoke.log 2>&1 ;;
     smoke_gca) ADV=gca  bash scripts/smoke_train.sh > /root/autodl-tmp/smoke_gca.log 2>&1 ;;
@@ -59,7 +67,16 @@ case "$JOB" in
     *)         push "未知任务" "$JOB"; exit 1 ;;
 esac
 rc=$?
-if [ $rc -eq 0 ]; then push "冒烟训练完成 ($JOB)" "看日志"; else push "冒烟训练报错 ($JOB)" "exit $rc，看日志末尾"; fi
+mark job_end
+
+# timing summary -> results/timing_<job>.json (committed later with the results)
+LOGF=/root/autodl-tmp/smoke.log; [ "$JOB" = smoke_gca ] && LOGF=/root/autodl-tmp/smoke_gca.log
+GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 | tr ' ' '_')
+SUMMARY=$(python3 scripts/summarize_timing.py "$LOGF" "$STAGES" "$JOB" gpu="$GPU" n_gpus=1 \
+          train_batch=8 rollout_n=4 max_response=2048 2>&1 | tail -1)
+cp "$STAGES" "results/stages_${JOB}.txt" 2>/dev/null || true
+
+if [ $rc -eq 0 ]; then push "冒烟训练完成 ($JOB)" "$SUMMARY"; else push "冒烟训练报错 ($JOB)" "exit $rc；$SUMMARY"; fi
 
 if [ "$AFTER" = shutdown_always ] || { [ "$AFTER" = shutdown ] && [ $rc -eq 0 ]; }; then
     push "即将关机" "AFTER=$AFTER，1 分钟后关机停止计费"
