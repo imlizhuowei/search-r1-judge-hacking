@@ -2,6 +2,7 @@
 # Runs ON the server right after a GPU boot (started by tools/grab_gpu.py over SSH, or by hand).
 #   bash scripts/on_boot.sh smoke        # retriever + tool check + 3-step GRPO smoke run
 #   bash scripts/on_boot.sh smoke_gca    # same, but ADV=gca
+#   EXP=grpo_em_s1 ADV=grpo bash scripts/on_boot.sh train   # real run (scripts/train.sh); set MAX_RUN_HOURS high
 # AFTER=keep (default) leaves the GPU running when the job ends; AFTER=shutdown powers the instance off
 # (AutoDL stops billing when /usr/bin/shutdown is run inside the instance). On failure we always keep it
 # running unless AFTER=shutdown_always, so we can debug without having to grab a card again.
@@ -21,8 +22,9 @@ cd "$REPO"
 
 push() {  # push "title" "body"
     echo "[$(date +%H:%M:%S)] $1 $2"
-    [ -n "${BARK_KEY:-}" ] && curl -s -m 10 -G "https://api.day.app/${BARK_KEY}/$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1")" \
-        --data-urlencode "body=$2" > /dev/null || true
+    local q='import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1] or " ", safe=""))'
+    [ -n "${BARK_KEY:-}" ] && curl -s -m 10 \
+        "https://api.day.app/${BARK_KEY}/$(python3 -c "$q" "$1")/$(python3 -c "$q" "${2:- }")" > /dev/null || true
 }
 
 if [ -e "$LOCK" ] && kill -0 "$(cat $LOCK)" 2>/dev/null; then
@@ -44,6 +46,9 @@ if [ "$MAX_RUN_HOURS" != 0 ]; then
     echo $! > /root/autodl-tmp/deadman.pid
     push "已设置强制关机" "${MAX_RUN_HOURS} 小时后无论如何都会关机"
 fi
+
+# memory monitor (CPU RAM was the bottleneck in the first smoke run)
+setsid nohup bash -c 'while true; do echo "$(date +%H:%M:%S) $(free -g | awk "/Mem:/{print \"used=\"\$3\"G avail=\"\$7\"G\"}") gpu=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader | head -1)"; sleep 60; done' >> /root/autodl-tmp/mem.log 2>&1 < /dev/null &
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || { push "没有 GPU" "nvidia-smi 失败"; exit 1; }
 command -v uv > /dev/null || { push "找不到 uv" "PATH=$PATH"; exit 1; }
@@ -77,23 +82,34 @@ push "搜索工具正常" ""
 
 # 3. job
 mark job_start
+LOGF=/root/autodl-tmp/smoke.log
+[ "$JOB" = smoke_gca ] && LOGF=/root/autodl-tmp/smoke_gca.log
+[ "$JOB" = train ] && LOGF=/root/autodl-fs/runs/${EXP:-grpo_em_s1}/train.log && mkdir -p "$(dirname $LOGF)"
+if [ "$JOB" = train ]; then   # hourly progress push while training
+    ( while sleep 3600; do push "训练进度 ${EXP:-grpo_em_s1}" "$(python3 scripts/progress.py "$LOGF" "${STEPS:-300}" 2>&1 | tail -1)"; done ) &
+    PROG_PID=$!
+fi
 case "$JOB" in
-    smoke)     ADV=grpo bash scripts/smoke_train.sh > /root/autodl-tmp/smoke.log 2>&1 ;;
-    smoke_gca) ADV=gca  bash scripts/smoke_train.sh > /root/autodl-tmp/smoke_gca.log 2>&1 ;;
+    smoke)     ADV=grpo bash scripts/smoke_train.sh > "$LOGF" 2>&1 ;;
+    smoke_gca) ADV=gca  bash scripts/smoke_train.sh > "$LOGF" 2>&1 ;;
+    train)     push "开始训练 ${EXP:-grpo_em_s1}" "ADV=${ADV:-grpo}，每小时推送一次进度"
+               bash scripts/train.sh >> "$LOGF" 2>&1 ;;
     none)      push "环境就绪" "未启动训练"; exit 0 ;;
     *)         push "未知任务" "$JOB"; exit 1 ;;
 esac
 rc=$?
 mark job_end
+[ -n "${PROG_PID:-}" ] && kill "$PROG_PID" 2>/dev/null
 
 # timing summary -> results/timing_<job>.json (committed later with the results)
-LOGF=/root/autodl-tmp/smoke.log; [ "$JOB" = smoke_gca ] && LOGF=/root/autodl-tmp/smoke_gca.log
 GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 | tr ' ' '_')
+if [ "$JOB" = train ]; then TB=${BATCH:-64}; RN=${N:-5}; else TB=8; RN=4; fi
 SUMMARY=$(python3 scripts/summarize_timing.py "$LOGF" "$STAGES" "$JOB" gpu="$GPU" n_gpus=1 \
-          train_batch=8 rollout_n=4 max_response=2048 2>&1 | tail -1)
+          train_batch=$TB rollout_n=$RN max_response=2048 2>&1 | tail -1)
 cp "$STAGES" "results/stages_${JOB}.txt" 2>/dev/null || true
 
-if [ $rc -eq 0 ]; then push "冒烟训练完成 ($JOB)" "$SUMMARY"; else push "冒烟训练报错 ($JOB)" "exit $rc；$SUMMARY"; fi
+[ "$JOB" = train ] && SUMMARY="$(python3 scripts/progress.py "$LOGF" "${STEPS:-300}" 2>&1 | tail -1)"
+if [ $rc -eq 0 ]; then push "任务完成 ($JOB)" "$SUMMARY"; else push "任务报错 ($JOB)" "exit $rc；$SUMMARY；看 $LOGF 末尾"; fi
 
 if [ "$AFTER" = shutdown_always ] || { [ "$AFTER" = shutdown ] && [ $rc -eq 0 ]; }; then
     push "即将关机" "AFTER=$AFTER，1 分钟后关机停止计费"
