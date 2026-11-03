@@ -91,3 +91,27 @@ def test_status_survives_network_drop(monkeypatch):
 
     api.s.post = post
     assert api.status("u") == "running"
+
+
+def test_launch_ok_even_if_ssh_hangs(monkeypatch):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+
+    def fake_run(cmd, **kw):
+        assert "-n" in cmd and "LAUNCHED" in cmd[-1]
+        raise g.subprocess.TimeoutExpired(cmd, 60, output="LAUNCHED\n")
+
+    monkeypatch.setattr(g.subprocess, "run", fake_run)
+    g.launch("ssh -p 1 root@h", "smoke", None)  # must not raise
+
+
+def test_launch_retries_then_fails(monkeypatch):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    calls = []
+
+    class R:
+        stdout, stderr, returncode = "", "Connection refused", 255
+
+    monkeypatch.setattr(g.subprocess, "run", lambda cmd, **kw: calls.append(1) or R())
+    with pytest.raises(g.Fatal):
+        g.launch("ssh -p 1 root@h", "smoke", None)
+    assert len(calls) == 30

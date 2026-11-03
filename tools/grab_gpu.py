@@ -153,19 +153,31 @@ def wait_running(api: AutoDL, uuid: str, timeout_s: int = 900) -> None:
 
 
 def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep", max_run_hours: float = 3) -> None:
-    # Retry a few times: sshd may need a moment after the container is "running".
+    """Start on_boot.sh on the server, fully detached.
+
+    AutoDL sessions may stay open after the command finishes (seen with `ssh ... echo ok`), so we do not
+    wait for ssh to exit: the remote side prints LAUNCHED once the job is in the background, and we
+    stop waiting after 60 s and look for that marker in whatever output arrived."""
     remote = (f"cd /root/autodl-tmp/search-r1-judge-hacking && git pull -q; "
-              f"BARK_KEY={bark or ''} AFTER={after} MAX_RUN_HOURS={int(max_run_hours)} nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 &")
-    r = None
+              f"BARK_KEY={bark or ''} AFTER={after} MAX_RUN_HOURS={int(max_run_hours)} "
+              f"setsid nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 < /dev/null & "
+              f"echo LAUNCHED")
+    cmd = ssh_cmd.split() + ["-n", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes",
+                             "-o", "ConnectTimeout=20", remote]
+    err = ""
     for _ in range(30):
-        r = subprocess.run(ssh_cmd.split() + ["-o", "StrictHostKeyChecking=accept-new",
-                                              "-o", "BatchMode=yes", remote], capture_output=True, text=True)
-        if r.returncode == 0:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            out, err = r.stdout or "", r.stderr or ""
+        except subprocess.TimeoutExpired as e:
+            out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+            err = "ssh session did not close (timeout)"
+        if "LAUNCHED" in out:
             notify(bark, "任务已在服务器上启动", f"on_boot.sh {job}")
             return
         time.sleep(20)
     notify(bark, "SSH 启动任务失败，卡在空转！", "请尽快手动登录运行 on_boot.sh 或关机")
-    raise Fatal("ssh failed: " + (r.stderr or "")[:200])
+    raise Fatal("ssh failed: " + err[:200])
 
 
 def main():
