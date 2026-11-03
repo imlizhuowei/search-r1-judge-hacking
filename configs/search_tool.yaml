@@ -1,0 +1,25 @@
+tools:
+  - class_name: agent.search_tool.SearchTool
+    config:
+      type: native
+      retrieval_service_url: http://127.0.0.1:8000/retrieve
+      topk: 3
+      timeout: 30
+      max_retries: 3
+      max_queries_per_call: 4
+      max_concurrency: 64
+    tool_schema:
+      type: function
+      function:
+        name: search
+        description: Searches the web for relevant information based on the given query.
+        parameters:
+          type: object
+          properties:
+            query_list:
+              type: array
+              items:
+                type: string
+              description: A list of fully-formed semantic queries. The tool will return search results for each query.
+          required:
+            - query_list
