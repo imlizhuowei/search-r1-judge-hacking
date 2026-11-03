@@ -2,10 +2,14 @@
 # Runs ON the server right after a GPU boot (started by tools/grab_gpu.py over SSH, or by hand).
 #   bash scripts/on_boot.sh smoke        # retriever + tool check + 3-step GRPO smoke run
 #   bash scripts/on_boot.sh smoke_gca    # same, but ADV=gca
+# AFTER=keep (default) leaves the GPU running when the job ends; AFTER=shutdown powers the instance off
+# (AutoDL stops billing when /usr/bin/shutdown is run inside the instance). On failure we always keep it
+# running unless AFTER=shutdown_always, so we can debug without having to grab a card again.
 # Progress goes to /root/autodl-tmp/on_boot.log; each stage pushes to your phone if BARK_KEY is set.
 set -uo pipefail
 
 JOB=${1:-smoke}
+AFTER=${AFTER:-keep}   # keep | shutdown | shutdown_always
 REPO=/root/autodl-tmp/search-r1-judge-hacking
 LOCK=/root/autodl-tmp/on_boot.lock
 cd "$REPO"
@@ -56,3 +60,9 @@ case "$JOB" in
 esac
 rc=$?
 if [ $rc -eq 0 ]; then push "冒烟训练完成 ($JOB)" "看日志"; else push "冒烟训练报错 ($JOB)" "exit $rc，看日志末尾"; fi
+
+if [ "$AFTER" = shutdown_always ] || { [ "$AFTER" = shutdown ] && [ $rc -eq 0 ]; }; then
+    push "即将关机" "AFTER=$AFTER，1 分钟后关机停止计费"
+    sleep 60
+    /usr/bin/shutdown
+fi

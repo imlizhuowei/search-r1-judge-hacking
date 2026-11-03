@@ -128,10 +128,10 @@ def wait_running(api: AutoDL, uuid: str, timeout_s: int = 900) -> None:
     raise Fatal("开机超时")
 
 
-def launch(ssh_cmd: str, job: str, bark: str | None) -> None:
+def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep") -> None:
     # Retry a few times: sshd may need a moment after the container is "running".
     remote = (f"cd /root/autodl-tmp/search-r1-judge-hacking && git pull -q; "
-              f"BARK_KEY={bark or ''} nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 &")
+              f"BARK_KEY={bark or ''} AFTER={after} nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 &")
     for _ in range(12):
         r = subprocess.run(ssh_cmd.split() + ["-o", "StrictHostKeyChecking=accept-new",
                                               "-o", "BatchMode=yes", remote], capture_output=True, text=True)
@@ -152,6 +152,8 @@ def main():
     ap.add_argument("--ssh", help='e.g. "ssh -p 12345 root@connect.xxx.seetacloud.com" (key login)')
     ap.add_argument("--job", default="smoke", help="argument passed to scripts/on_boot.sh")
     ap.add_argument("--bark-key", default=os.environ.get("BARK_KEY"))
+    ap.add_argument("--after", default="keep", choices=["keep", "shutdown", "shutdown_always"],
+                    help="when the job ends: keep the GPU / shut down if it succeeded / always shut down")
     a = ap.parse_args()
 
     token = os.environ.get("AUTODL_TOKEN") or open(a.token_file).read().strip()
@@ -164,7 +166,7 @@ def main():
             wait_running(api, a.instance)
         notify(a.bark_key, "实例已运行", "GPU 模式")
         if a.ssh:
-            launch(a.ssh, a.job, a.bark_key)
+            launch(a.ssh, a.job, a.bark_key, a.after)
     except Fatal as e:
         notify(a.bark_key, "抢卡脚本停止", str(e))
         sys.exit(1)
