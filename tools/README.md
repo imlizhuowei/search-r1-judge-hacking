@@ -22,7 +22,7 @@
 python tools/grab_gpu.py --instance <实例UUID> --ssh "ssh -p <端口> root@<地址>" --bark-key <key>
 ```
 
-- `--interval 3`：每 3 秒试一次（最低 2 秒）
+- `--interval 1`：每秒试一次（默认，也是下限）；被限流（429）时自动退避 5→80 秒
 - `--job smoke | smoke_gca | none`：开机后跑什么
 - `--after keep | shutdown | shutdown_always`：任务结束后 保持开机 / 成功才关机（默认；失败保留现场方便排查）/ 无论成败都关机
 - 每个阶段的时间点和每步训练耗时会写进 `results/timing_<job>.json`，用来推算正式训练的时间和费用

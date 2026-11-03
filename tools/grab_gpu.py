@@ -35,7 +35,7 @@ BASE = "https://www.autodl.com"
 CAPACITY_HINTS = ("无空闲", "没有空闲", "暂无空闲", "资源不足", "库存不足", "GPU不足", "已售罄")
 TERMINAL = {"AuthorizeFailed": "登录 token 失效，请重新复制", "TORecharge": "余额不足，请充值",
             "TORealName": "需要实名认证"}
-MIN_INTERVAL = 2.0  # seconds; do not hammer the platform
+MIN_INTERVAL = 1.0  # seconds; one request at a time, never concurrent
 
 
 class Capacity(Exception):
@@ -43,6 +43,10 @@ class Capacity(Exception):
 
 
 class Fatal(Exception):
+    pass
+
+
+class RateLimited(Exception):
     pass
 
 
@@ -66,7 +70,7 @@ class AutoDL:
         if r.status_code in (401, 403):
             raise Fatal(TERMINAL["AuthorizeFailed"])
         if r.status_code == 429:
-            raise Capacity("rate limited (429)")
+            raise RateLimited("429")
         r.raise_for_status()
         j = r.json()
         code, msg = j.get("code"), str(j.get("msg", ""))
@@ -98,15 +102,23 @@ def grab(api: AutoDL, uuid: str, interval: float, bark: str | None, max_hours: f
     interval = max(interval, MIN_INTERVAL)
     t_end = time.time() + max_hours * 3600
     n = 0
+    n_429 = 0
     while time.time() < t_end:
         n += 1
         try:
             api.power_on(uuid)
+            n_429 = 0
             notify(bark, "抢到卡了", f"第 {n} 次尝试成功，正在开机")
             return
         except Capacity as e:
             if n % 60 == 1:
                 print(f"[{time.strftime('%H:%M:%S')}] 无卡，继续等待 (#{n}): {str(e)[:40]}", flush=True)
+        except RateLimited:
+            backoff = min(60, 5 * 2 ** min(n_429, 4))
+            n_429 += 1
+            print(f"  被限流，暂停 {backoff}s", flush=True)
+            time.sleep(backoff)
+            continue
         except Fatal:
             raise
         except Exception as e:  # network hiccup: back off a little
@@ -147,7 +159,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--instance", required=True, help="instance UUID from the console")
     ap.add_argument("--token-file", default=os.path.expanduser("~/.autodl_token"))
-    ap.add_argument("--interval", type=float, default=3.0, help=f"seconds between tries (min {MIN_INTERVAL})")
+    ap.add_argument("--interval", type=float, default=1.0, help=f"seconds between tries (min {MIN_INTERVAL})")
     ap.add_argument("--max-hours", type=float, default=24)
     ap.add_argument("--ssh", help='e.g. "ssh -p 12345 root@connect.xxx.seetacloud.com" (key login)')
     ap.add_argument("--job", default="smoke", help="argument passed to scripts/on_boot.sh")

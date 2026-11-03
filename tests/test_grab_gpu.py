@@ -67,3 +67,11 @@ def test_status_lookup():
                                                                     {"uuid": "u", "status": "running"}],
                                                            "result_total": 2}})])
     assert api.status("u") == "running"
+
+
+def test_rate_limit_backs_off_then_continues(monkeypatch):
+    slept = []
+    monkeypatch.setattr(g.time, "sleep", lambda s: slept.append(s))
+    api = make_api([FakeResp({}, status=429), FakeResp({"code": "Success"})])
+    g.grab(api, "u", interval=1, bark=None, max_hours=1)
+    assert 5 in slept and len(api.calls) == 2
