@@ -20,11 +20,11 @@ REPO=/root/autodl-tmp/search-r1-judge-hacking
 LOCK=/root/autodl-tmp/on_boot.lock
 cd "$REPO"
 
-push() {  # push "title" "body"
+push() {  # push "title" "body" [level]; level=passive -> silent (no sound, no banner), used for hourly progress
     echo "[$(date +%H:%M:%S)] $1 $2"
     local q='import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1] or " ", safe=""))'
     [ -n "${BARK_KEY:-}" ] && curl -s -m 10 \
-        "https://api.day.app/${BARK_KEY}/$(python3 -c "$q" "$1")/$(python3 -c "$q" "${2:- }")" > /dev/null || true
+        "https://api.day.app/${BARK_KEY}/$(python3 -c "$q" "$1")/$(python3 -c "$q" "${2:- }")?level=${3:-active}" > /dev/null || true
 }
 
 if [ -e "$LOCK" ] && kill -0 "$(cat $LOCK)" 2>/dev/null; then
@@ -96,7 +96,7 @@ LOGF=/root/autodl-tmp/smoke.log
 [ "$JOB" = smoke_gca ] && LOGF=/root/autodl-tmp/smoke_gca.log
 [ "$JOB" = train ] && LOGF=/root/autodl-fs/runs/${EXP:-grpo_em_s1}/train.log && mkdir -p "$(dirname $LOGF)"
 if [ "$JOB" = train ]; then   # hourly progress push while training
-    ( while sleep 3600; do push "训练进度 ${EXP:-grpo_em_s1}" "$(python3 scripts/progress.py "$LOGF" "${STEPS:-300}" 2>&1 | tail -1)"; done ) &
+    ( while sleep 3600; do push "训练进度 ${EXP:-grpo_em_s1}" "$(python3 scripts/progress.py "$LOGF" "${STEPS:-300}" 2>&1 | tail -1)" passive; done ) &
     PROG_PID=$!
 fi
 case "$JOB" in
