@@ -12,6 +12,20 @@ VERL=${VERL:-/root/autodl-tmp/verl}
 MODEL=${MODEL:-/root/autodl-tmp/models/Qwen2.5-3B-Instruct}
 DATA=${DATA:-/root/autodl-tmp/data/searchR1_processed_direct}
 STEPS=${STEPS:-3}
+ADV=${ADV:-grpo}   # grpo | gca   (gca needs: bash scripts/apply_verl_patch.sh, once)
+
+KL=0.001
+if [ "$ADV" = gca ]; then
+    KL=0.005   # GCA paper: KL must scale with the residual (App. D.3, FM4)
+    ADV_ARGS=(
+        algorithm.adv_estimator=gca
+        trainer.use_v1=False   # legacy trainer merges reward extra info into the batch
+        custom_reward_function.path="$REPO/gca/reward.py"
+        custom_reward_function.name=compute_score
+    )
+else
+    ADV_ARGS=(algorithm.adv_estimator=grpo)
+fi
 
 export UV_CACHE_DIR=/root/autodl-tmp/uv_cache
 export HF_HOME=/root/autodl-tmp/hf_cache
@@ -23,7 +37,6 @@ export NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost
 cd "$VERL"   # uv run --frozen needs verl's pyproject/uv.lock
 
 uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="$DATA/train.parquet" \
     data.val_files="$DATA/test.parquet" \
@@ -41,7 +54,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.actor.ppo_mini_batch_size=8 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.actor.use_kl_loss=True \
-    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_coef=$KL \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
@@ -71,4 +84,5 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     trainer.total_training_steps="$STEPS" \
     trainer.default_local_dir=/root/autodl-tmp/ckpt/smoke \
     ray_kwargs.ray_init.runtime_env.py_executable="uv -v run --frozen --all-packages --extra vllm --extra fsdp" \
+    "${ADV_ARGS[@]}" \
     "$@"

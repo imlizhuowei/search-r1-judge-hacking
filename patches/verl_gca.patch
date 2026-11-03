@@ -1,0 +1,20 @@
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -247,6 +247,8 @@
+         data.batch["returns"] = returns
+     else:
+         # handle all other adv estimator type other than GAE and GRPO
++        if adv_estimator == "gca":
++            import gca.verl_plugin  # noqa: F401  (search-r1-judge-hacking) registers the "gca" estimator
+         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
+         adv_kwargs = {
+             "token_level_rewards": data.batch["token_level_rewards"],
+@@ -258,7 +260,7 @@
+         if "reward_baselines" in data.batch:  # optional
+             adv_kwargs["reward_baselines"] = data.batch["reward_baselines"]
+         # GDPO: pass raw data for per-dimension reward extraction
+-        if adv_estimator in (AdvantageEstimator.GDPO, "gdpo"):
++        if adv_estimator in (AdvantageEstimator.GDPO, "gdpo", "gca"):
+             adv_kwargs["non_tensor_batch"] = data.non_tensor_batch
+             adv_kwargs["batch"] = data.batch
+         # Add sum_pi_squared for Optimal Token Baseline

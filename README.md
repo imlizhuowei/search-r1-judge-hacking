@@ -16,7 +16,8 @@ Many real tasks have no gold answer, so training relies on an **LLM judge**. Jud
 
 - **Train without gold, evaluate with gold.** Rewards come from a judge that does not see the reference answer. Evaluation sets (NQ, HotpotQA, etc.) do have gold answers, so EM serves as an objective anchor; judge scores are reported as process metrics, plus a human-checked subset.
 - Small control: a reference-based judge on key configurations only.
-- Judge via API with a pinned model version, temperature 0, and every request/response cached and logged.
+- **Training judge: a local open-weight model** (e.g. Qwen2.5-7B / Qwen3-8B via vLLM, fixed checkpoint, temperature 0). An API judge is too costly at training scale (~2.5k judge calls per step, ~0.5M per run) and its version can change silently; related work (s3, *More Convincing, Not More Correct*) also trains with local judges.
+- **Audit judge: an independent API model from a different family** (Kimi), used only on small samples; first line of audit is free (EM / substring match against gold on eval sets), plus a human-checked subset. Every judge request/response is cached and logged.
 - Main claims rest on MuSiQue / 2Wiki / HotpotQA; Bamboogle (125 questions) is supporting evidence only. Paired bootstrap CIs are reported.
 
 ## Plan
