@@ -11,6 +11,10 @@ set -uo pipefail
 JOB=${1:-smoke}
 AFTER=${AFTER:-keep}   # keep | shutdown | shutdown_always
 MAX_RUN_HOURS=${MAX_RUN_HOURS:-3}   # hard cap: power off after this long no matter what (0 = no cap)
+# Started over non-interactive ssh: ~/.bashrc / conda init may not have run, so set PATH ourselves.
+source /etc/profile > /dev/null 2>&1 || true
+export PATH="/root/miniconda3/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/bin:$PATH"
+RETRIEVER_PY=/root/autodl-tmp/envs/retriever/bin/python
 REPO=/root/autodl-tmp/search-r1-judge-hacking
 LOCK=/root/autodl-tmp/on_boot.lock
 cd "$REPO"
@@ -42,13 +46,16 @@ if [ "$MAX_RUN_HOURS" != 0 ]; then
 fi
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || { push "没有 GPU" "nvidia-smi 失败"; exit 1; }
+command -v uv > /dev/null || { push "找不到 uv" "PATH=$PATH"; exit 1; }
+[ -x "$RETRIEVER_PY" ] || { push "找不到检索环境" "$RETRIEVER_PY"; exit 1; }
 git pull -q || true
 bash scripts/apply_verl_patch.sh > /dev/null 2>&1 || true
 
 # 1. retriever (CPU faiss, ~64 GB RAM; first start rescans corpus offsets)
 if ! curl -s -m 5 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' \
         -d '{"queries":["test"],"topk":1}' > /dev/null; then
-    nohup bash retriever/launch.sh > /root/autodl-tmp/retriever.log 2>&1 &
+    # launch.sh calls plain `python`, so put the retriever venv first on PATH
+    PATH="$(dirname $RETRIEVER_PY):$PATH" nohup bash retriever/launch.sh > /root/autodl-tmp/retriever.log 2>&1 &
     push "检索服务启动中" "首次要扫描偏移量，可能要几十分钟"
 fi
 for i in $(seq 1 240); do   # wait up to 2 h
