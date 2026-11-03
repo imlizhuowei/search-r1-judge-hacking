@@ -87,6 +87,9 @@ class AutoDL:
     def power_on(self, uuid: str) -> None:
         self._post("/api/v1/instance/power_on", {"instance_uuid": uuid}, power_on=True)
 
+    def power_off(self, uuid: str) -> None:
+        self._post("/api/v1/instance/power_off", {"instance_uuid": uuid})
+
     def status(self, uuid: str, retries: int = 60) -> str | None:
         """Retries through network drops (flaky hotspot): up to ~10 min."""
         for i in range(retries):
@@ -190,6 +193,19 @@ def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep", max_ru
     raise Fatal("ssh failed: " + err[:200])
 
 
+def safe_power_off(api: AutoDL, uuid: str, bark: str | None, reason: str) -> None:
+    """Job could not be started on a GPU we grabbed: power it off through the console API (no SSH needed)."""
+    for i in range(30):
+        try:
+            api.power_off(uuid)
+            notify(bark, "已自动关机（任务没启动）", reason[:80])
+            return
+        except Exception as e:
+            print(f"  关机失败 {i + 1}/30: {str(e)[:60]}", flush=True)
+            time.sleep(20)
+    notify(bark, "自动关机也失败了！请手动关机", reason[:80])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--instance", required=True, help="instance UUID from the console")
@@ -207,20 +223,28 @@ def main():
 
     token = os.environ.get("AUTODL_TOKEN") or open(a.token_file).read().strip()
     api = AutoDL(token)
+    grabbed = False
     try:
         st = api.status(a.instance)
         print("当前状态:", st)
         if st != "running":
             grab(api, a.instance, a.interval, a.bark_key, a.max_hours)
+            grabbed = True
             wait_running(api, a.instance)
         notify(a.bark_key, "实例已运行", "GPU 模式")
         if a.ssh:
             launch(a.ssh, a.job, a.bark_key, a.after, a.max_run_hours)
     except Fatal as e:
-        notify(a.bark_key, "抢卡脚本停止", str(e))
+        if grabbed:
+            safe_power_off(api, a.instance, a.bark_key, str(e))
+        else:
+            notify(a.bark_key, "抢卡脚本停止", str(e))
         sys.exit(1)
-    except Exception as e:  # unexpected crash: the instance may be running and billing
-        notify(a.bark_key, "抢卡脚本崩溃，检查实例是否在空转", str(e)[:80])
+    except BaseException as e:  # crash or Ctrl+C after grabbing: never leave a GPU idling
+        if grabbed:
+            safe_power_off(api, a.instance, a.bark_key, f"脚本异常: {str(e)[:60]}")
+        else:
+            notify(a.bark_key, "抢卡脚本停止", str(e)[:80])
         raise
 
 

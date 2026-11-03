@@ -171,3 +171,39 @@ def test_remote_command_missing_on_boot(monkeypatch, tmp_path):
                         lambda cmd, **kw: fake(cmd[:-1] + [cmd[-1].replace("/usr/bin/shutdown", "true")], **kw))
     with pytest.raises(g.Fatal):
         g.launch("ssh -p 1 root@h", "smoke", None)
+
+
+def test_main_powers_off_if_launch_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    tok = tmp_path / "t"; tok.write_text("tok")
+    calls = []
+    statuses = iter(["shutdown", "running"])
+    monkeypatch.setattr(g.AutoDL, "status", lambda self, u, retries=60: next(statuses))
+    monkeypatch.setattr(g.AutoDL, "power_on", lambda self, u: calls.append("on"))
+    monkeypatch.setattr(g.AutoDL, "power_off", lambda self, u: calls.append("off"))
+
+    def bad_launch(*a, **k):
+        raise g.Fatal("ssh failed: port changed")
+
+    monkeypatch.setattr(g, "launch", bad_launch)
+    monkeypatch.setattr(g.sys, "argv", ["x", "--instance", "u", "--token-file", str(tok), "--ssh", "ssh -p 1 root@h"])
+    with pytest.raises(SystemExit):
+        g.main()
+    assert calls == ["on", "off"]
+
+
+def test_main_no_power_off_if_never_grabbed(monkeypatch, tmp_path):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    tok = tmp_path / "t"; tok.write_text("tok")
+    calls = []
+    monkeypatch.setattr(g.AutoDL, "status", lambda self, u, retries=60: "shutdown")
+    monkeypatch.setattr(g.AutoDL, "power_off", lambda self, u: calls.append("off"))
+
+    def no_card(*a, **k):
+        raise g.Fatal("token expired")
+
+    monkeypatch.setattr(g, "grab", no_card)
+    monkeypatch.setattr(g.sys, "argv", ["x", "--instance", "u", "--token-file", str(tok)])
+    with pytest.raises(SystemExit):
+        g.main()
+    assert calls == []
