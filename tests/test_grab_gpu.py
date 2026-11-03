@@ -115,3 +115,14 @@ def test_launch_retries_then_fails(monkeypatch):
     with pytest.raises(g.Fatal):
         g.launch("ssh -p 1 root@h", "smoke", None)
     assert len(calls) == 30
+
+
+def test_launch_missing_on_boot_schedules_shutdown(monkeypatch):
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+
+    class R:
+        stdout, stderr, returncode = "MISSING_ON_BOOT\n", "", 0
+
+    monkeypatch.setattr(g.subprocess, "run", lambda cmd, **kw: R())
+    with pytest.raises(g.Fatal):
+        g.launch("ssh -p 1 root@h", "smoke", None)

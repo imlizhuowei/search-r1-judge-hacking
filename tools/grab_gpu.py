@@ -160,8 +160,11 @@ def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep", max_ru
     stop waiting after 60 s and look for that marker in whatever output arrived."""
     remote = (f"cd /root/autodl-tmp/search-r1-judge-hacking && git pull -q; "
               f"BARK_KEY={bark or ''} AFTER={after} MAX_RUN_HOURS={int(max_run_hours)} "
+              f"if [ -f scripts/on_boot.sh ]; then "
               f"setsid nohup bash scripts/on_boot.sh {job} > /root/autodl-tmp/on_boot.log 2>&1 < /dev/null & "
-              f"echo LAUNCHED")
+              f"echo LAUNCHED; "
+              f"else (setsid nohup bash -c 'sleep 600; /usr/bin/shutdown' > /dev/null 2>&1 < /dev/null &); "
+              f"echo MISSING_ON_BOOT; fi")
     cmd = ssh_cmd.split() + ["-n", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes",
                              "-o", "ConnectTimeout=20", remote]
     err = ""
@@ -172,6 +175,9 @@ def launch(ssh_cmd: str, job: str, bark: str | None, after: str = "keep", max_ru
         except subprocess.TimeoutExpired as e:
             out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
             err = "ssh session did not close (timeout)"
+        if "MISSING_ON_BOOT" in out:
+            notify(bark, "服务器上没有 on_boot.sh", "git pull 失败？10 分钟后自动关机")
+            raise Fatal("on_boot.sh missing on server; scheduled shutdown in 10 min")
         if "LAUNCHED" in out:
             notify(bark, "任务已在服务器上启动", f"on_boot.sh {job}")
             return
