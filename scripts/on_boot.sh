@@ -10,6 +10,7 @@ set -uo pipefail
 
 JOB=${1:-smoke}
 AFTER=${AFTER:-keep}   # keep | shutdown | shutdown_always
+MAX_RUN_HOURS=${MAX_RUN_HOURS:-3}   # hard cap: power off after this long no matter what (0 = no cap)
 REPO=/root/autodl-tmp/search-r1-judge-hacking
 LOCK=/root/autodl-tmp/on_boot.lock
 cd "$REPO"
@@ -30,6 +31,15 @@ STAGES=/root/autodl-tmp/on_boot_stages.txt
 : > "$STAGES"
 mark() { echo "$1 $(date +%s)" >> "$STAGES"; }   # stage timestamps, for cost/time extrapolation
 mark boot
+
+# Dead-man switch: runs detached on the server, independent of this script and of your laptop's network.
+if [ "$MAX_RUN_HOURS" != 0 ]; then
+    setsid nohup bash -c "sleep \$(( ${MAX_RUN_HOURS} * 3600 )); \
+        curl -s -m 10 'https://api.day.app/${BARK_KEY:-none}/%E8%BE%BE%E5%88%B0%E6%97%B6%E9%97%B4%E4%B8%8A%E9%99%90%EF%BC%8C%E5%BC%BA%E5%88%B6%E5%85%B3%E6%9C%BA' >/dev/null; \
+        sleep 30; /usr/bin/shutdown" > /dev/null 2>&1 &
+    echo $! > /root/autodl-tmp/deadman.pid
+    push "已设置强制关机" "${MAX_RUN_HOURS} 小时后无论如何都会关机"
+fi
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || { push "没有 GPU" "nvidia-smi 失败"; exit 1; }
 git pull -q || true
