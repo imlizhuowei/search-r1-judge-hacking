@@ -7,6 +7,15 @@ MODEL=${MODEL:-/root/autodl-tmp/models/e5-base-v2}
 # Keep the datasets/Arrow cache off the 30GB system disk.
 # (corpus is read line-by-line via cached byte offsets; no datasets/Arrow cache needed)
 export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
+# Only ONE retriever ever. A second launch.sh (e.g. started while the first was reloading the index and not
+# answering yet) would load another ~60 GB copy, fail to bind the port, and loop forever re-loading it:
+# that is what pushed the 120 GB container into OOM on 11-04 (two retrievers: 60.6 + 52.3 GB).
+LOCK=${LOCK:-/root/autodl-tmp/retriever.lock}
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    echo "[$(date +%H:%M:%S)] another retriever/launch.sh holds $LOCK; not starting a second one" >&2
+    exit 0
+fi
 # Restart on crash (it segfaulted once mid-training on 11-04). Each restart reloads the 64 GB index (~4 min);
 # tool calls during that window return "Search error" text instead of crashing the rollout.
 while true; do
