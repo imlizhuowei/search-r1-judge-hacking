@@ -9,7 +9,7 @@ import pytest
 REPO = os.path.join(os.path.dirname(__file__), "..")
 
 
-def run_queue(tmp_path, queue_lines, QUEUE="", fail_job=None):
+def run_queue(tmp_path, queue_lines, QUEUE="", fail_job=None, extra_env=None):
     log = tmp_path / "calls.txt"
     fake = tmp_path / "fake_on_boot.sh"
     fake.write_text(
@@ -19,7 +19,8 @@ def run_queue(tmp_path, queue_lines, QUEUE="", fail_job=None):
     qf = tmp_path / "queue.txt"
     qf.write_text("\n".join(queue_lines) + "\n")
     env = dict(os.environ, REPO=os.path.abspath(REPO), QUEUE_FILE=str(qf), ON_BOOT=f"bash {fake}",
-               POLL="0", SKIP_WAIT_CLEANUP="1", EXIT_WHEN_EMPTY="1", QUEUE=QUEUE, BARK_KEY="")
+               POLL="0", SKIP_WAIT_CLEANUP="1", EXIT_WHEN_EMPTY="1", QUEUE=QUEUE, BARK_KEY="",
+               **(extra_env or {}))
     r = subprocess.run(["bash", os.path.join(REPO, "scripts", "queue_next.sh")], env=env,
                        capture_output=True, text=True, timeout=30)
     calls = log.read_text().splitlines() if log.exists() else []
@@ -43,3 +44,18 @@ def test_queue_stops_on_failure(tmp_path):
     assert r.returncode == 3
     assert calls == ["smoke_gca EXP= ADV= AFTER=keep"]      # later jobs not started
     assert "EXP=a train" in left
+
+
+def test_idle_timeout_shuts_down(tmp_path):
+    # IDLE_HOURS=0 -> immediately idle-timeout; replace shutdown with a marker via a fake /usr/bin path is not
+    # possible, so run the queue with the shutdown branch turned into "touch marker" by a sed'd copy.
+    src = open(os.path.join(REPO, "scripts", "queue_next.sh")).read()
+    marker = tmp_path / "shutdown_called"
+    patched = tmp_path / "queue_next.sh"
+    patched.write_text(src.replace("/usr/bin/shutdown", f"touch {marker}").replace("sleep 60", "true"))
+    qf = tmp_path / "queue.txt"
+    qf.write_text("")
+    env = dict(os.environ, REPO=os.path.abspath(REPO), QUEUE_FILE=str(qf), ON_BOOT="true", POLL="0",
+               SKIP_WAIT_CLEANUP="1", IDLE_HOURS="0", QUEUE="", BARK_KEY="")
+    r = subprocess.run(["bash", str(patched)], env=env, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and marker.exists(), r.stdout + r.stderr

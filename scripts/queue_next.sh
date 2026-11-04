@@ -7,7 +7,8 @@
 #        echo "EXP=judge_grpo_s1 ADV=grpo train" >> /root/autodl-tmp/queue.txt
 #        echo "shutdown"                         >> /root/autodl-tmp/queue.txt
 #    A line is: [VAR=value ...] <job>, where <job> is an on_boot.sh job (train, smoke, smoke_gca, none)
-#    or the word "shutdown". When the file is empty the GPU stays on (unless AFTER=shutdown).
+#    or the word "shutdown". When the file is empty the GPU stays on (unless AFTER=shutdown),
+#    but only for IDLE_HOURS (default 5): idle longer than that -> shut down.
 #
 #   QUEUE="smoke_gca train" EXP=gca_em_s1 ADV=gca BARK_KEY=... MAX_RUN_HOURS=40 \
 #     setsid nohup bash scripts/queue_next.sh > /root/autodl-tmp/queue.log 2>&1 < /dev/null &
@@ -18,6 +19,7 @@ REPO=${REPO:-/root/autodl-tmp/search-r1-judge-hacking}
 QUEUE_FILE=${QUEUE_FILE:-/root/autodl-tmp/queue.txt}
 ON_BOOT=${ON_BOOT:-bash scripts/on_boot.sh}
 POLL=${POLL:-60}
+IDLE_HOURS=${IDLE_HOURS:-5}
 cd "$REPO"
 touch "$QUEUE_FILE"
 
@@ -75,9 +77,11 @@ for job in ${QUEUE:-}; do
 done
 
 idle_pushed=0
+idle_since=0
 while true; do
     if line=$(pop_line); then
         idle_pushed=0
+        idle_since=0
         push "队列：开始" "$line"
         run_line "$line"
         rc=$?
@@ -85,8 +89,13 @@ while true; do
     else
         if [ "${AFTER:-keep}" = shutdown ]; then run_line "shutdown"; fi
         if [ $idle_pushed = 0 ]; then
-            push "队列空了，GPU 空闲中" "追加任务: echo '... train' >> $QUEUE_FILE；或 echo shutdown"
+            idle_since=$(date +%s)
+            push "队列空了，GPU 空闲中" "${IDLE_HOURS} 小时内没有新任务就自动关机。追加: echo '... train' >> $QUEUE_FILE"
             idle_pushed=1
+        fi
+        if [ $(( $(date +%s) - idle_since )) -ge $(awk "BEGIN{print int(${IDLE_HOURS}*3600)}") ]; then
+            push "空闲超过 ${IDLE_HOURS} 小时" "自动关机"
+            run_line "shutdown"
         fi
         [ "${EXIT_WHEN_EMPTY:-0}" = 1 ] && exit 0
         sleep "$POLL"
