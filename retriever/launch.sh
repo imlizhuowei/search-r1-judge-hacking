@@ -18,9 +18,16 @@ if ! flock -n 9; then
 fi
 # Restart on crash (it segfaulted once mid-training on 11-04). Each restart reloads the 64 GB index (~4 min);
 # tool calls during that window return "Search error" text instead of crashing the rollout.
+# Index: the fp16 copy if it exists (retriever/convert_index_fp16.py; ~30 GB instead of ~60 GB RAM, retrieval
+# agreement checked in results/retriever_fp16_check.json), else the original Flat. INDEX=... overrides.
+if [ -z "${INDEX:-}" ]; then
+    INDEX="$DATA/e5_Flat.index"
+    [ -f "$DATA/e5_SQfp16.index" ] && INDEX="$DATA/e5_SQfp16.index"
+fi
+echo "[$(date +%H:%M:%S)] retriever index: $INDEX" >&2
 while true; do
 python "$(dirname "$0")/retrieval_server.py" \
-  --index_path "$DATA/e5_Flat.index" \
+  --index_path "$INDEX" \
   --corpus_path "$DATA/wiki-18.jsonl" \
   --topk 3 \
   --retriever_name e5 \
