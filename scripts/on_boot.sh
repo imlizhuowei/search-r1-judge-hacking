@@ -39,6 +39,12 @@ mark() { echo "$1 $(date +%s)" >> "$STAGES"; }   # stage timestamps, for cost/ti
 mark boot
 
 # Dead-man switch: runs detached on the server, independent of this script and of your laptop's network.
+# One timer per job: a previous job's timer (queue runs jobs back to back) is cancelled first, otherwise
+# it would still fire on its own schedule in the middle of this job.
+if [ -f /root/autodl-tmp/deadman.pid ]; then
+    kill -- -"$(cat /root/autodl-tmp/deadman.pid)" 2>/dev/null || true   # setsid -> pid is the process group
+    rm -f /root/autodl-tmp/deadman.pid
+fi
 if [ "$MAX_RUN_HOURS" != 0 ]; then
     setsid nohup bash -c "sleep \$(( ${MAX_RUN_HOURS} * 3600 )); \
         curl -s -m 10 'https://api.day.app/${BARK_KEY:-none}/%E8%BE%BE%E5%88%B0%E6%97%B6%E9%97%B4%E4%B8%8A%E9%99%90%EF%BC%8C%E5%BC%BA%E5%88%B6%E5%85%B3%E6%9C%BA' >/dev/null; \
