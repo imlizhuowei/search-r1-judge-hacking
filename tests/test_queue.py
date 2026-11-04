@@ -39,11 +39,12 @@ def test_queue_runs_initial_then_file_jobs(tmp_path):
     assert "# comment" in left
 
 
-def test_queue_stops_on_failure(tmp_path):
-    r, calls, left = run_queue(tmp_path, ["EXP=a train", "EXP=b train"], QUEUE="smoke_gca", fail_job="smoke_gca")
-    assert r.returncode == 3
-    assert calls == ["smoke_gca EXP= ADV= AFTER=keep"]      # later jobs not started
-    assert "EXP=a train" in left
+def test_failure_skips_rest_of_initial_queue_but_keeps_reading_file(tmp_path):
+    r, calls, left = run_queue(tmp_path, ["EXP=fixed smoke_gca2"], QUEUE="smoke_gca train", fail_job="smoke_gca")
+    assert r.returncode == 3                                   # last failure code is reported
+    assert calls[0] == "smoke_gca EXP= ADV= AFTER=keep"
+    assert "train EXP= ADV= AFTER=keep" not in calls           # rest of QUEUE skipped
+    assert calls[1] == "smoke_gca2 EXP=fixed ADV= AFTER=keep"  # a job appended after the fix still runs
 
 
 def test_idle_timeout_shuts_down(tmp_path):

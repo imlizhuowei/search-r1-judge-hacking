@@ -13,7 +13,8 @@
 #   QUEUE="smoke_gca train" EXP=gca_em_s1 ADV=gca BARK_KEY=... MAX_RUN_HOURS=40 \
 #     setsid nohup bash scripts/queue_next.sh > /root/autodl-tmp/queue.log 2>&1 < /dev/null &
 #
-# A failed job stops the queue and keeps the GPU on for debugging.
+# A failed job skips the rest of $QUEUE, but the queue keeps running: the GPU stays on for debugging and you
+# can append a fixed job; with nothing new for IDLE_HOURS it shuts down (so a failure never idles forever).
 set -uo pipefail
 REPO=${REPO:-/root/autodl-tmp/search-r1-judge-hacking}
 QUEUE_FILE=${QUEUE_FILE:-/root/autodl-tmp/queue.txt}
@@ -70,10 +71,15 @@ if [ "${SKIP_WAIT_CLEANUP:-0}" != 1 ]; then
     push "上一个训练已结束" "$( [ -n "$PREV" ] && python3 scripts/progress.py "$PREV" 300 2>&1 | tail -1 )"
 fi
 
+last_rc=0
 for job in ${QUEUE:-}; do
     AFTER=keep $ON_BOOT "$job"
     rc=$?
-    if [ $rc -ne 0 ]; then push "队列停止" "$job 失败 (exit $rc)，GPU 保持开着，等你排查"; exit $rc; fi
+    if [ $rc -ne 0 ]; then
+        last_rc=$rc
+        push "任务失败，跳过后面的预定任务" "$job (exit $rc)。GPU 开着等你排查，${IDLE_HOURS} 小时没有新任务就关机"
+        break
+    fi
 done
 
 idle_pushed=0
@@ -85,7 +91,10 @@ while true; do
         push "队列：开始" "$line"
         run_line "$line"
         rc=$?
-        if [ $rc -ne 0 ]; then push "队列停止" "$line 失败 (exit $rc)，GPU 保持开着"; exit $rc; fi
+        if [ $rc -ne 0 ]; then
+            last_rc=$rc
+            push "任务失败" "$line (exit $rc)。GPU 开着等你排查，${IDLE_HOURS} 小时没有新任务就关机"
+        fi
     else
         if [ "${AFTER:-keep}" = shutdown ]; then run_line "shutdown"; fi
         if [ $idle_pushed = 0 ]; then
@@ -97,7 +106,7 @@ while true; do
             push "空闲超过 ${IDLE_HOURS} 小时" "自动关机"
             run_line "shutdown"
         fi
-        [ "${EXIT_WHEN_EMPTY:-0}" = 1 ] && exit 0
+        [ "${EXIT_WHEN_EMPTY:-0}" = 1 ] && exit $last_rc
         sleep "$POLL"
     fi
 done

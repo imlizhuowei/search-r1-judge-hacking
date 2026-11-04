@@ -20,8 +20,10 @@ if [ "$ADV" = gca ]; then
     ADV_ARGS=(
         algorithm.adv_estimator=gca
         trainer.use_v1=False   # legacy trainer merges reward extra info into the batch
-        custom_reward_function.path="$REPO/gca/reward.py"
-        custom_reward_function.name=compute_score
+        # NOTE: must be reward.custom_reward_function.* — the top-level custom_reward_function is silently ignored
+        #       by the reward loop in this verl version (only fully_async migrates it)
+        reward.custom_reward_function.path="$REPO/gca/reward.py"
+        reward.custom_reward_function.name=compute_score
     )
 else
     ADV_ARGS=(algorithm.adv_estimator=grpo)
@@ -47,6 +49,8 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     data.filter_overlong_prompts=True \
     data.truncation=error \
     data.return_raw_chat=True \
+    data.dataloader_num_workers=2 \
+    reward.num_workers=2 \
     actor_rollout_ref.model.path="$MODEL" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -71,7 +75,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.rollout.multi_turn.max_tool_response_length=512 \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$REPO/configs/search_tool.yaml" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.ref.fsdp_config.param_offload=False \
     trainer.critic_warmup=0 \
     trainer.val_before_train=False \
     trainer.logger='["console"]' \

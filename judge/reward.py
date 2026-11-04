@@ -1,7 +1,10 @@
-"""verl reward using an LLM judge (use with reward_model.reward_manager=batch).
+"""verl reward using an LLM judge.
 
-  custom_reward_function.path=<repo>/judge/reward.py  custom_reward_function.name=compute_score
-  +custom_reward_function.reward_kwargs.variant=answer_only   (etc.)
+  reward.custom_reward_function.path=<repo>/judge/reward.py  reward.custom_reward_function.name=compute_score
+  (judge prompt variant from env JUDGE_VARIANT, default answer_only)
+
+verl's reward loop calls compute_score once per sample (sync functions run in a thread pool, so judge
+calls overlap). compute_score_batch is the same logic for a list (used by calibration scripts).
 
 The judge's verdict is the training reward. Gold-based EM, ToolHit and GCA labels are computed too but
 ONLY logged as extra info (train without gold, monitor with gold): this gives the judge-vs-EM gap per step,
@@ -40,8 +43,16 @@ def _golds(gt):
     return [str(x) for x in (g or [])]
 
 
-def compute_score(data_sources, solution_strs, ground_truths, extra_infos, variant: str = "answer_only",
-                  client: JudgeClient | None = None, **kwargs) -> list[dict]:
+def compute_score(data_source, solution_str, ground_truth, extra_info=None, client: JudgeClient | None = None,
+                  **kwargs) -> dict:
+    """Per-sample entry point for verl's reward loop."""
+    variant = os.environ.get("JUDGE_VARIANT", "answer_only")
+    return compute_score_batch([data_source], [solution_str], [ground_truth], [extra_info or {}],
+                               variant=variant, client=client)[0]
+
+
+def compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos, variant: str = "answer_only",
+                        client: JudgeClient | None = None, **kwargs) -> list[dict]:
     client = client or get_client()
     msgs, idx, results = [], [], []
     for i, (sol, gt, ex) in enumerate(zip(solution_strs, ground_truths, extra_infos)):

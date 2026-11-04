@@ -8,7 +8,7 @@ import pytest
 
 from judge.client import JudgeClient
 from judge.prompts import build_messages, parse_verdict
-from judge.reward import compute_score
+from judge.reward import compute_score, compute_score_batch
 
 
 class FakeJudge(BaseHTTPRequestHandler):
@@ -84,9 +84,15 @@ def test_reward_trains_on_judge_logs_em(client):
         "<answer>John Adams</answer>",                 # wrong, judge agrees
         "<tool_call>x</tool_call>",                    # no answer -> 0, no judge call
     ]
-    res = compute_score(["searchR1_nq"] * 4, sols, [gt] * 4, [{"question": "Who wrote it?"}] * 4, client=client)
+    res = compute_score_batch(["searchR1_nq"] * 4, sols, [gt] * 4, [{"question": "Who wrote it?"}] * 4, client=client)
     assert [r["score"] for r in res] == [1.0, 1.0, 0.0, 0.0]
     assert [r["em"] for r in res] == [1, 0, 0, 0]
     # the hacked sample: judge reward 1, gold EM 0 -> exactly what we monitor
     assert res[1]["score"] == 1.0 and res[1]["em"] == 0
     assert FakeJudge.calls == 3
+
+
+def test_per_sample_entry_point(client):
+    r = compute_score("searchR1_nq", "<answer>definitely wrong</answer>", {"target": ["Thomas Jefferson"]},
+                      {"question": "Who wrote it?"}, client=client)
+    assert r["score"] == 1.0 and r["em"] == 0       # gullible judge rewarded a wrong answer; EM is logged

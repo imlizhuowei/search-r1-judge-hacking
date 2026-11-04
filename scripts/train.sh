@@ -37,8 +37,9 @@ if [ "$ADV" = gca ]; then
     ADV_ARGS=(
         algorithm.adv_estimator=gca
         trainer.use_v1=False
-        custom_reward_function.path="$REPO/gca/reward.py"
-        custom_reward_function.name=compute_score
+        # NOTE: reward.custom_reward_function.* (top-level custom_reward_function is silently ignored)
+        reward.custom_reward_function.path="$REPO/gca/reward.py"
+        reward.custom_reward_function.name=compute_score
     )
 fi
 
@@ -60,6 +61,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     data.truncation=error \
     data.return_raw_chat=True \
     data.dataloader_num_workers=2 \
+    reward.num_workers=2 \
     data.seed=$SEED \
     actor_rollout_ref.model.path="$MODEL" \
     actor_rollout_ref.model.use_remove_padding=True \
