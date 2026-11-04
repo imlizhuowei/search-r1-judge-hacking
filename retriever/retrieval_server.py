@@ -20,6 +20,7 @@
 import argparse
 import json
 import os
+import sys
 import warnings
 from typing import Optional
 
@@ -28,6 +29,9 @@ import faiss
 import numpy as np
 import torch
 import uvicorn
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from batcher import SearchBatcher  # noqa: E402
 from fastapi import FastAPI
 from pydantic import BaseModel
 from tqdm import tqdm
@@ -309,7 +313,7 @@ class DenseRetriever(BaseRetriever):
 
         results = []
         scores = []
-        for start_idx in tqdm(range(0, len(query_list), self.batch_size), desc="Retrieval process: "):
+        for start_idx in range(0, len(query_list), self.batch_size):
             query_batch = query_list[start_idx : start_idx + self.batch_size]
             batch_emb = self.encoder.encode(query_batch)
             batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
@@ -388,6 +392,7 @@ class QueryRequest(BaseModel):
 
 
 app = FastAPI()
+batcher = None
 
 
 @app.post("/retrieve")
@@ -418,10 +423,8 @@ def retrieve_endpoint(request: QueryRequest):
     if not request.topk:
         request.topk = config.retrieval_topk  # fallback to default
 
-    # Perform batch retrieval
-    results, scores = retriever.batch_search(
-        query_list=request.queries, num=request.topk, return_score=request.return_scores
-    )
+    # Perform batch retrieval (through the single-threaded batcher)
+    results, scores = batcher.submit(list(request.queries), request.topk).result(timeout=300)
 
     # Format response
     resp = []
@@ -475,6 +478,7 @@ if __name__ == "__main__":
 
     # 2) Instantiate a global retriever so it is loaded once and reused.
     retriever = get_retriever(config)
+    batcher = SearchBatcher(retriever, max_queries=256, wait_ms=5.0)
 
     # 3) Launch the server. By default, it listens on http://127.0.0.1:8000
     uvicorn.run(app, host="0.0.0.0", port=args.port)

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Start the local E5 + 2018-Wikipedia retrieval server (CPU faiss; index stays in RAM).
 # Usage: bash retriever/launch.sh            (run inside the retriever venv)
-set -euo pipefail
+set -uo pipefail   # no -e: the restart loop must survive a crash
 DATA=${DATA:-/root/autodl-fs/searchr1}
 MODEL=${MODEL:-/root/autodl-tmp/models/e5-base-v2}
 # Keep the datasets/Arrow cache off the 30GB system disk.
 # (corpus is read line-by-line via cached byte offsets; no datasets/Arrow cache needed)
 export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
+# Restart on crash (it segfaulted once mid-training on 11-04). Each restart reloads the 64 GB index (~4 min);
+# tool calls during that window return "Search error" text instead of crashing the rollout.
+while true; do
 python "$(dirname "$0")/retrieval_server.py" \
   --index_path "$DATA/e5_Flat.index" \
   --corpus_path "$DATA/wiki-18.jsonl" \
@@ -14,3 +17,7 @@ python "$(dirname "$0")/retrieval_server.py" \
   --retriever_name e5 \
   --retriever_model "$MODEL" \
   --port "${PORT:-8000}"
+  rc=$?
+  echo "[$(date +%H:%M:%S)] retrieval_server exited with code $rc; restarting in 5 s" >&2
+  sleep 5
+done
