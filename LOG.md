@@ -12,7 +12,8 @@ Record every run here: date, config, what you expected, what happened, and what 
 | Date | Decision | Why |
 |---|---|---|
 | 2026-11-03 | Training judge = local open model; audit judge = Kimi API (different family) on small samples | API cost/rate limits at ~0.5M calls per run; reproducibility; s3 and *More Convincing* use local training judges; different family avoids shared blind spots |
-| 2026-11-03 | GCA runs use the legacy trainer (`trainer.use_v1=False`) + a 2-line verl patch | V1 trainer only passes fixed fields to the advantage step; legacy trainer merges reward extra info into `non_tensor_batch` |
+| 2026-11-03 | ~~GCA runs use the legacy trainer (`trainer.use_v1=False`)~~ superseded 11-04 | V1 trainer only passes fixed fields to the advantage step; legacy trainer merges reward extra info into `non_tensor_batch` |
+| 2026-11-04 | GCA runs on the **V1 trainer** (same as the baseline) via `patches/verl_gca_v1.patch` | Legacy trainer OOM'd the 120GB container (ref-logprob worker 44.6GB + retriever 61.6GB), and baseline-vs-GCA on different trainers would confound the comparison. Patch reads `extra_fields.reward_extra_info` from the TransferQueue into `non_tensor_batch`. |
 | 2026-10-31 | Focus on judge-reward hacking + GCA-style credit assignment, not a plain Search-R1 reproduction | Plain Search-R1 reproductions are common; GCA's own limitation (needs gold answers) leaves the judge setting open |
 | 2026-10-31 | Reference-free judge as main line; small reference-based control | Matches the no-gold setting; the control shows how much a reference helps |
 | 2026-10-31 | Qwen2.5-3B (not 1.5B) | Tree-GRPO reports chain-based GRPO struggles to elicit multi-turn tool use at 1.5B; 3B allows comparison with GCA's numbers |

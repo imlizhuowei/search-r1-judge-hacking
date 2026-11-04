@@ -35,8 +35,7 @@ ADV_ARGS=(algorithm.adv_estimator=grpo)
 if [ "$ADV" = gca ]; then
     KL=0.005   # GCA paper App. D.3 (FM4)
     ADV_ARGS=(
-        algorithm.adv_estimator=gca
-        trainer.use_v1=False
+        algorithm.adv_estimator=gca   # V1 trainer, same as the baseline (needs patches/verl_gca_v1.patch)
         # NOTE: reward.custom_reward_function.* (top-level custom_reward_function is silently ignored)
         reward.custom_reward_function.path="$REPO/gca/reward.py"
         reward.custom_reward_function.name=compute_score

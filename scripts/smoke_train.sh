@@ -18,8 +18,7 @@ KL=0.001
 if [ "$ADV" = gca ]; then
     KL=0.005   # GCA paper: KL must scale with the residual (App. D.3, FM4)
     ADV_ARGS=(
-        algorithm.adv_estimator=gca
-        trainer.use_v1=False   # legacy trainer merges reward extra info into the batch
+        algorithm.adv_estimator=gca   # V1 trainer, same as the baseline (needs patches/verl_gca_v1.patch)
         # NOTE: must be reward.custom_reward_function.* — the top-level custom_reward_function is silently ignored
         #       by the reward loop in this verl version (only fully_async migrates it)
         reward.custom_reward_function.path="$REPO/gca/reward.py"
