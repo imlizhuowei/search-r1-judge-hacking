@@ -10,7 +10,8 @@ import re
 import sys
 
 NUM = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
-KV = re.compile(rf"([A-Za-z0-9_./@-]+):({NUM})(?=\s|$)")
+# values may be printed bare or wrapped, e.g. "num_turns/mean:np.float64(5.125)"
+KV = re.compile(rf"([A-Za-z0-9_./@-]+):(?:np\.\w+\()?({NUM})\)?(?=\s|$)")
 
 
 def summarize(path: str, total: int) -> str:
@@ -20,7 +21,7 @@ def summarize(path: str, total: int) -> str:
             if "step:" in line and "timing_s/step" in line:
                 kv = {k: float(v) for k, v in KV.findall(line)}
                 steps.append(kv)
-            m = re.findall(rf"val-core/[^:]+/(?:reward|score|acc)[^:]*:({NUM})", line)
+            m = re.findall(rf"val-core/[^:]+/(?:reward|score|acc)[^:]*:(?:np\.\w+\()?({NUM})", line)
             if m:
                 vals = [float(x) for x in m]
                 val = sum(vals) / len(vals)

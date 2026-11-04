@@ -126,3 +126,4 @@ if [ "$AFTER" = shutdown_always ] || { [ "$AFTER" = shutdown ] && [ $rc -eq 0 ];
     sleep 60
     /usr/bin/shutdown
 fi
+exit $rc

@@ -17,7 +17,8 @@ import sys
 from statistics import mean
 
 NUM = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
-KV = re.compile(rf"([A-Za-z0-9_./@-]+):({NUM})(?=\s|$)")
+# values may be printed bare or wrapped, e.g. "num_turns/mean:np.float64(5.125)"
+KV = re.compile(rf"([A-Za-z0-9_./@-]+):(?:np\.\w+\()?({NUM})\)?(?=\s|$)")
 KEEP = ("timing_s/", "timing_per_token_ms/", "response_length/", "prompt_length/", "num_turns",
         "critic/score/mean", "critic/rewards/mean", "perf/throughput", "perf/max_memory")
 
