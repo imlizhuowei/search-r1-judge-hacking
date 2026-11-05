@@ -62,6 +62,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     data.dataloader_num_workers=2 \
     reward.num_workers=2 \
     data.seed=$SEED \
+    actor_rollout_ref.rollout.seed=$SEED \
     actor_rollout_ref.model.path="$MODEL" \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \

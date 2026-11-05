@@ -30,6 +30,13 @@ Then idle 5 h -> auto shutdown. Results: /root/autodl-fs/runs/<EXP>/ (train.log,
 - Phase-1 exit checks still open (README Plan): (3) record the gap to the GCA paper's baseline (our val 0.237 on a
   700-q subset vs the paper's numbers, ~20x more training there); (4) verify top-k statistics on a fixed batch.
 
+## Seeds: what actually varies
+- verl 8e48d72: `data.seed` only sets the train-dataloader shuffle; vLLM sampling (`actor_rollout_ref.rollout.seed`)
+  and model init seeds default to 42. The 4 queued/finished runs (s1, s2) were launched before this was noticed:
+  their seeds vary the DATA ORDER only (sampling seed fixed at 42). From commit after aa5e9ca, train.sh also sets
+  rollout.seed=$SEED. Do NOT bundle that commit to the server until gca_em_s2 has started, so grpo_em_s2 and
+  gca_em_s2 stay matched. The 3-seed judge runs use the full seeding.
+
 ## Check FIRST (affects the running GCA runs)
 - LOG 11-03 open item (a): the decoded response the reward sees must keep the `<tool_response>` tags, otherwise
   ToolHit = 0 everywhere and every GCA label degenerates. Check on the gca_em_s1 rollouts: tag rate and the
