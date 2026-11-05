@@ -30,8 +30,14 @@ Then idle 5 h -> auto shutdown. Results: /root/autodl-fs/runs/<EXP>/ (train.log,
 - Phase-1 exit checks still open (README Plan): (3) record the gap to the GCA paper's baseline (our val 0.237 on a
   700-q subset vs the paper's numbers, ~20x more training there); (4) verify top-k statistics on a fixed batch.
 
+## Check FIRST (affects the running GCA runs)
+- LOG 11-03 open item (a): the decoded response the reward sees must keep the `<tool_response>` tags, otherwise
+  ToolHit = 0 everywhere and every GCA label degenerates. Check on the gca_em_s1 rollouts: tag rate and the
+  gca_type mix (should contain A/B/C/D, not all one type).
+
 ## Next (in order)
 1. When runs finish: scripts/analyze_rollouts.py on each run; compare val curves (grpo s1/s2 vs gca s1/s2).
+   Stratify eval by "answer seen in train" (LOG 11-03 data audit) and look at the 1,377 duplicate test questions.
 2. Judge arm: vLLM judge server script (Qwen2.5-7B-Instruct), REWARD=judge switch in train.sh, judge-vs-EM
    calibration on baseline rollouts. Needs: judge model downloaded (server internet), ideally a 2-GPU instance
    (GPU0 policy training unchanged, GPU1 judge server).
