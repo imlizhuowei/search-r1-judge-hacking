@@ -37,6 +37,10 @@ Then idle 5 h -> auto shutdown. Results: /root/autodl-fs/runs/<EXP>/ (train.log,
   rollout.seed=$SEED. Do NOT bundle that commit to the server until gca_em_s2 has started, so grpo_em_s2 and
   gca_em_s2 stay matched. The 3-seed judge runs use the full seeding.
 
+## Confound to resolve: KL differs between arms
+- GRPO arms use kl_loss_coef 0.001, GCA arms 0.005 (paper App. D.3). So "GCA vs GRPO" also changes KL. Options:
+  a GRPO control at KL 0.005 (one seed), or argue from the paper's own setup. Decide before writing results.
+
 ## Check FIRST (affects the running GCA runs)
 - LOG 11-03 open item (a): the decoded response the reward sees must keep the `<tool_response>` tags, otherwise
   ToolHit = 0 everywhere and every GCA label degenerates. Check on the gca_em_s1 rollouts: tag rate and the

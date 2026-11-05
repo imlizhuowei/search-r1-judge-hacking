@@ -2,12 +2,14 @@
 # Real training run: Qwen2.5-3B-Instruct + search tool, 1 GPU.
 #   EXP=grpo_em_s1 ADV=grpo bash scripts/train.sh
 #   EXP=gca_em_s1  ADV=gca  bash scripts/train.sh
-# Sized from the smoke run (11-04): ~27k tokens/step at 8x4 took ~39 s; 64x5 is ~10x the tokens.
-# Expect ~4-5 min/step on one A800 -> 300 steps ~ 20-25 h (+ validation).
+# Timing (11-04, grpo_em_s1): 1.6-2.6 min/step, 300 steps ~ 10 h incl. validation.
 #
-# Memory: the retriever keeps ~64 GB in CPU RAM, and the smoke run peaked at ~125 GB of 120 GB.
-# So: 2 dataloader workers (default 8, each copies the dataset), ref model on GPU (no CPU offload),
-# Ray object store capped at 10 GB.
+# Memory (120 GB container): the retriever now uses the fp16 index (~30 GB; was ~60 GB with the fp32 Flat index),
+# the trainer worker ~50 GB. Still: 2 dataloader workers (default 8, each copies the dataset), ref model on GPU
+# (no CPU offload), Ray object store capped at 10 GB.
+#
+# KL: 0.001 for GRPO, 0.005 for GCA (GCA paper App. D.3). NOTE this is a second difference between the arms
+# besides the advantage estimator; see NEXT.md.
 #
 # Checkpoints (model + optimizer, ~45 GB each) go to file storage (/root/autodl-fs), not the 50 GB data disk.
 # Rerunning the same EXP resumes from the latest checkpoint (trainer.resume_mode=auto).
