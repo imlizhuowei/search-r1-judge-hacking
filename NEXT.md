@@ -23,10 +23,22 @@ Then idle 5 h -> auto shutdown. Results: /root/autodl-fs/runs/<EXP>/ (train.log,
   (git fetch <file>.bundle main && git merge --ff-only FETCH_HEAD).
 - mem.log "container_used" includes page cache; real usage = anon in /sys/fs/cgroup/memory.stat.
 
+## Caveats for interpreting the current GCA runs (gca_em_s1/s2)
+- They are **GCA with constant salience c = c_max** (top-k log-probs not wired yet, LOG 11-03 design note), plus
+  Retr(x)=1, B2 approximated as "no <answer>", D0 masked as zero advantage. Report them as "GCA (const-salience)",
+  not as a full reproduction of the paper's method.
+- Phase-1 exit checks still open (README Plan): (3) record the gap to the GCA paper's baseline (our val 0.237 on a
+  700-q subset vs the paper's numbers, ~20x more training there); (4) verify top-k statistics on a fixed batch.
+
 ## Next (in order)
 1. When runs finish: scripts/analyze_rollouts.py on each run; compare val curves (grpo s1/s2 vs gca s1/s2).
 2. Judge arm: vLLM judge server script (Qwen2.5-7B-Instruct), REWARD=judge switch in train.sh, judge-vs-EM
    calibration on baseline rollouts. Needs: judge model downloaded (server internet), ideally a 2-GPU instance
    (GPU0 policy training unchanged, GPU1 judge server).
-3. mem monitor: log anon/file split.
-4. Look into response-length growth in the baseline (279 -> 474).
+   Audit: Kimi on small samples + EM/substring as the free first line + a human-checked subset.
+3. Full GCA salience from top-k log-probs (LOG 11-03: option B, top-32 from the actor's forward) before the
+   judge+GCA runs; then exit check (4).
+4. Seeds target (README): judge+GRPO and judge+GCA, 3 matched seeds each.
+5. mem monitor: log anon/file split.
+6. tools/grab_gpu.py does not work with the sub-account token yet (capture the sub-account console requests).
+7. Look into response-length growth in the baseline (279 -> 474).
