@@ -2,6 +2,13 @@
 
 Updated 2026-11-05.
 
+## Where the rest lives
+- Research question, protocol, plan, deliverables: README.md (Motivation / Protocol / Plan).
+- Every decision since 10-31 with its reason (3B model, verl not verl-agent, sync first, reference-free judge,
+  local training judge + Kimi audit judge, gold filtering only as control, V1 trainer, fp16 index): LOG.md "Decisions".
+- GCA hyper-parameters (eta 0.2, c_max 0.5, kappa 0.1, routing table) and KL 0.005: gca/advantage.py, scripts/train.sh.
+- Scope agreed with the user: 1 seed per arm first, then more seeds (ordering, not cutting scope).
+
 ## Running (queue on the A800 instance, /root/autodl-tmp/queue.txt)
 1. gca_em_s1  — GCA, seed 1 (started 11-04 ~18:30 CST, ~10 h)
 2. grpo_em_s2 — GRPO baseline, seed 2
