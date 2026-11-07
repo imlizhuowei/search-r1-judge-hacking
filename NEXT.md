@@ -9,14 +9,20 @@ Updated 2026-11-05.
 - GCA hyper-parameters (eta 0.2, c_max 0.5, kappa 0.1, routing table) and KL 0.005: gca/advantage.py, scripts/train.sh.
 - Scope agreed with the user: 1 seed per arm first, then more seeds (ordering, not cutting scope).
 
-## Running (queue on the A800 instance, /root/autodl-tmp/queue.txt)
+## STATUS 11-07: instance is OFF (40 h timer fired 11-06 10:28)
+- gca_em_s1 reached step 218/300 at ~9 min/step (4x the baseline) -> fp16 index suspected; launch.sh now defaults to
+  the Flat index again. Confirm from train.log timing (gen vs update) before blaming it for sure.
+- Resume gca_em_s1 from its step-200 checkpoint (resume_mode auto), then grpo_em_s2 and gca_em_s2 — both s2 runs now
+  use the full seeding (data + rollout seed), so they stay matched with each other.
+
+## Running (queue on the A800 instance, /root/autodl-tmp/queue.txt) — superseded, see STATUS
 1. gca_em_s1  — GCA, seed 1 (started 11-04 ~18:30 CST, ~10 h)
 2. grpo_em_s2 — GRPO baseline, seed 2
 3. gca_em_s2  — GCA, seed 2
 Then idle 5 h -> auto shutdown. Results: /root/autodl-fs/runs/<EXP>/ (train.log, rollouts/, val/, ckpt).
 
 ## Facts to remember
-- Retriever now uses the fp16 index (e5_SQfp16.index): top-3 agreement 99.5% vs fp32 Flat, top-1 score diff <= 5.4e-7
+- Retriever used the fp16 index (e5_SQfp16.index) for gca_em_s1 steps 0–218 only: top-3 agreement 99.5% vs fp32 Flat, top-1 score diff <= 5.4e-7
   (results/retriever_fp16_check.json). grpo_em_s1 (val 0.237) used the fp32 Flat index; all later runs use fp16.
 - GCA runs on the V1 trainer (same code path as the baseline) via patches/verl_gca_v1.patch.
 - Server has had no outbound internet since 11-04 afternoon: code updates go in as git bundles

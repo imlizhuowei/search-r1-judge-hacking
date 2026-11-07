@@ -18,11 +18,13 @@ if ! flock -n 9; then
 fi
 # Restart on crash (it segfaulted once mid-training on 11-04). Each restart reloads the 64 GB index (~4 min);
 # tool calls during that window return "Search error" text instead of crashing the rollout.
-# Index: the fp16 copy if it exists (retriever/convert_index_fp16.py; ~30 GB instead of ~60 GB RAM, retrieval
-# agreement checked in results/retriever_fp16_check.json), else the original Flat. INDEX=... overrides.
+# Index: the original fp32 Flat index by default. The fp16 copy (e5_SQfp16.index, ~30 GB instead of ~60 GB) has no
+# BLAS search path: at full training batch (64x5 rollouts) it made gca_em_s1 ~4x slower (9 min/step vs 2 min/step
+# for the baseline) and the 40 h timer stopped it at step 218 (LOG 11-06). The real OOM causes were the legacy
+# trainer and a duplicate retriever, both fixed, so Flat fits. USE_FP16_INDEX=1 or INDEX=... overrides.
 if [ -z "${INDEX:-}" ]; then
     INDEX="$DATA/e5_Flat.index"
-    [ -f "$DATA/e5_SQfp16.index" ] && INDEX="$DATA/e5_SQfp16.index"
+    [ "${USE_FP16_INDEX:-0}" = 1 ] && INDEX="$DATA/e5_SQfp16.index"
 fi
 echo "[$(date +%H:%M:%S)] retriever index: $INDEX" >&2
 while true; do
