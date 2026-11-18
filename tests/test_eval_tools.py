@@ -140,3 +140,18 @@ def test_shell_scripts_parse():
     for s in ("scripts/eval.sh", "scripts/timing_probe.sh", "scripts/train.sh", "scripts/on_boot.sh",
               "retriever/launch.sh"):
         subprocess.run(["bash", "-n", os.path.join(ROOT, s)], check=True)
+
+
+def test_subset_dump_reuses_full_eval(tmp_path):
+    import subset_dump
+    full = tmp_path / "full" / "nq"
+    full.mkdir(parents=True)
+    rows = [{"question": q, "score": 1.0} for q in ["a", "b", "b", "c"]]
+    (full / "0.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    samp = tmp_path / "s.parquet"
+    pq.write_table(pa.Table.from_pylist([{"extra_info": {"question": q}} for q in ["b", "c"]]), samp)
+    assert subset_dump.subset(str(full), str(samp), str(tmp_path / "out")) == 2
+    assert len((tmp_path / "out" / "0.jsonl").read_text().splitlines()) == 2
+    pq.write_table(pa.Table.from_pylist([{"extra_info": {"question": "zzz"}}]), samp)
+    assert subset_dump.subset(str(full), str(samp), str(tmp_path / "out2")) == 0
+    assert not (tmp_path / "out2").exists()

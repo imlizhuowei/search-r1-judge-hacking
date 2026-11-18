@@ -60,6 +60,11 @@ for ds in $DATASETS; do
     if ls "$OUT/$ds"/*.jsonl > /dev/null 2>&1; then
         echo "[$(date +%H:%M:%S)] $ds already done, skipping"; continue
     fi
+    # sampled eval: if the full eval of this dataset already finished, just take the sampled rows from it
+    if [ "$SAMPLE" -gt 0 ] && n=$($PY scripts/subset_dump.py "/root/autodl-fs/runs/eval_$TAG/$ds" "$f" "$OUT/$ds" 2>/dev/null); then
+        push "评测 $TAG_OUT：$ds 复用完整评测" "$n 题，EM $($PY scripts/summarize_eval.py "$OUT" --one "$ds" 2>/dev/null | tail -1)"
+        continue
+    fi
     t0=$(date +%s)
     env "${RESUME[@]}" EXP="eval_${TAG_OUT}_${ds}" ADV=grpo STEPS=1 SAVE_FREQ=-1 TEST_FREQ=-1 VAL_BEFORE_TRAIN=True \
         VAL_FILE="$f" VAL_DIR="$OUT/$ds" VAL_BATCH=${VAL_BATCH:-256} \
