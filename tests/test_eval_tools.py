@@ -97,6 +97,10 @@ def test_split_and_strata(tmp_path):
                          ("bamboogle", "Q four", "B")]), tmp_path / "test.parquet")
     assert split_test.split(str(tmp_path)) == {"bamboogle": 1, "nq": 3}
     assert pq.read_table(tmp_path / "test_by_ds" / "nq.parquet").num_rows == 3
+    assert split_test.split(str(tmp_path), sample=2) == {"bamboogle": 1, "nq": 2}
+    a = pq.read_table(tmp_path / "test_by_ds_s2" / "nq.parquet").to_pylist()
+    split_test.split(str(tmp_path), sample=2)
+    assert pq.read_table(tmp_path / "test_by_ds_s2" / "nq.parquet").to_pylist() == a   # same seed, same questions
     s = make_strata.build(str(tmp_path))
     assert s["nq\tq one"] == {"q_in_train": 1, "ans_seen": 1, "dup": 1}
     assert s["nq\tq three"] == {"q_in_train": 0, "ans_seen": 0, "dup": 2}
