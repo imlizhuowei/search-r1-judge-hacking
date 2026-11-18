@@ -1,6 +1,6 @@
 # Status and next steps (keep this file current; it is the hand-off note between sessions)
 
-Updated 2026-11-05.
+Updated 2026-11-18.
 
 ## Where the rest lives
 - Research question, protocol, plan, deliverables: README.md (Motivation / Protocol / Plan).
@@ -9,7 +9,30 @@ Updated 2026-11-05.
 - GCA hyper-parameters (eta 0.2, c_max 0.5, kappa 0.1, routing table) and KL 0.005: gca/advantage.py, scripts/train.sh.
 - Scope agreed with the user: 1 seed per arm first, then more seeds (ordering, not cutting scope).
 
-## STATUS 11-07: instance is OFF (40 h timer fired 11-06 10:28)
+## STATUS 11-18: direction changed — reproduction + engineering, judge/GCA off the main line
+Decided with the user 11-11 / 11-18: the job-hunt project is a faithful Search-R1 reproduction with depth
+(data audit, badcase attribution, real debugging stories), not judge reward hacking + GCA. Judge and GCA code stay
+in the repo but are not run. The old queue (gca_em_s1 resume, grpo_em_s2, gca_em_s2) is CANCELLED.
+
+Must-do (agreed 11-18):
+1. Timing probe (`on_boot.sh probe` -> scripts/timing_probe.sh): resume grpo_em_s1 for 10 steps, verl timing per
+   step + retriever per-batch log (encode / faiss / docs, queue wait, query repeat rate). Decide afterwards whether
+   to optimise retrieval (cache / approximate index), per the numbers.
+2. Eval on the 7 test sets, paper protocol (`EVAL_TAG=base|grpo_em_s1 on_boot.sh eval` -> scripts/eval.sh):
+   results/eval_<tag>.json, results/eval_table.md (next to the paper's 3B numbers), strata clean/leaked/answer-seen.
+3. Badcase attribution (scripts/badcase.py, run automatically after each eval): results/badcase_<tag>.md.
+Queue for the next boot (instance 011, release deadline ~11-21 04:30 CST unless booted):
+    probe
+    EVAL_TAG=base eval
+    EVAL_TAG=grpo_em_s1 eval
+    shutdown
+Estimate: probe ~40 min, each eval ~3–4 h (51,713 greedy questions + 7 model loads). Not measured yet.
+
+Optional later (user decides after the probe): retrieval optimisation (query cache / IVF-HNSW index with
+recall + EM check), zero-advantage-group share from rollouts (DAPO dynamic sampling), second GRPO seed,
+vLLM serving (prefix cache, int4), memory breakdown.
+
+## (old) STATUS 11-07: instance is OFF (40 h timer fired 11-06 10:28)
 - gca_em_s1 reached step 218/300 at ~9 min/step (4x the baseline) -> fp16 index suspected; launch.sh now defaults to
   the Flat index again. Confirm from train.log timing (gen vs update) before blaming it for sure.
 - Resume gca_em_s1 from its step-200 checkpoint (resume_mode auto), then grpo_em_s2 and gca_em_s2 — both s2 runs now

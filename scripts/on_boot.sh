@@ -101,6 +101,8 @@ mark job_start
 LOGF=/root/autodl-tmp/smoke.log
 [ "$JOB" = smoke_gca ] && LOGF=/root/autodl-tmp/smoke_gca.log
 [ "$JOB" = train ] && LOGF=/root/autodl-fs/runs/${EXP:-grpo_em_s1}/train.log && mkdir -p "$(dirname $LOGF)"
+[ "$JOB" = eval ] && LOGF=/root/autodl-fs/runs/eval_${EVAL_TAG:-base}/on_boot.log && mkdir -p "$(dirname $LOGF)"
+[ "$JOB" = probe ] && LOGF=/root/autodl-fs/runs/timing_probe/on_boot.log && mkdir -p "$(dirname $LOGF)"
 if [ "$JOB" = train ]; then   # hourly progress push while training
     ( while sleep 3600; do push "训练进度 ${EXP:-grpo_em_s1}" "$(python3 scripts/progress.py "$LOGF" "${STEPS:-300}" 2>&1 | tail -1)" passive; done ) &
     PROG_PID=$!
@@ -110,6 +112,10 @@ case "$JOB" in
     smoke_gca) ADV=gca  bash scripts/smoke_train.sh > "$LOGF" 2>&1 ;;
     train)     push "开始训练 ${EXP:-grpo_em_s1}" "ADV=${ADV:-grpo}，每小时推送一次进度"
                bash scripts/train.sh >> "$LOGF" 2>&1 ;;
+    eval)      push "开始评测 ${EVAL_TAG:-base}" "7 个测试集，每做完一个推送一次"
+               EVAL_TAG=${EVAL_TAG:-base} bash scripts/eval.sh >> "$LOGF" 2>&1 ;;
+    probe)     push "开始计时测量" "从 grpo_em_s1 的检查点续训 10 步，记录每步和检索的耗时"
+               bash scripts/timing_probe.sh >> "$LOGF" 2>&1 ;;
     none)      push "环境就绪" "未启动训练"; exit 0 ;;
     *)         push "未知任务" "$JOB"; exit 1 ;;
 esac

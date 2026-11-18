@@ -45,4 +45,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
         "gca_n_obs": len(obs),
         "acc_lenient": lab.lenient,
         "has_answer": int(extract_answer(solution_str) is not None),
+        "n_tool_calls": solution_str.count("<tool_call>"),
+        # for per-dataset tables and leak/answer-seen strata in scripts/summarize_eval.py and badcase.py
+        "data_source": str(data_source),
+        "question": str((extra_info or {}).get("question", "")),
     }

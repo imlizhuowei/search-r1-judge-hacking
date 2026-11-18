@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import warnings
 from typing import Optional
 
@@ -313,16 +314,24 @@ class DenseRetriever(BaseRetriever):
 
         results = []
         scores = []
+        stats = {"encode_s": 0.0, "search_s": 0.0, "docs_s": 0.0}   # read by the batcher's stats log
         for start_idx in range(0, len(query_list), self.batch_size):
             query_batch = query_list[start_idx : start_idx + self.batch_size]
+            t0 = time.perf_counter()
             batch_emb = self.encoder.encode(query_batch)
+            t1 = time.perf_counter()
             batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
+            t2 = time.perf_counter()
             batch_scores = batch_scores.tolist()
             batch_idxs = batch_idxs.tolist()
 
             # load_docs is not vectorized, but is a python list approach
             flat_idxs = sum(batch_idxs, [])
             batch_results = load_docs(self.corpus, flat_idxs)
+            t3 = time.perf_counter()
+            stats["encode_s"] += t1 - t0
+            stats["search_s"] += t2 - t1
+            stats["docs_s"] += t3 - t2
             # chunk them back
             batch_results = [batch_results[i * num : (i + 1) * num] for i in range(len(batch_idxs))]
 
@@ -332,6 +341,7 @@ class DenseRetriever(BaseRetriever):
             del batch_emb, batch_scores, batch_idxs, query_batch, flat_idxs, batch_results
             torch.cuda.empty_cache()
 
+        self.last_stats = stats
         if return_score:
             return results, scores
         else:
@@ -478,7 +488,7 @@ if __name__ == "__main__":
 
     # 2) Instantiate a global retriever so it is loaded once and reused.
     retriever = get_retriever(config)
-    batcher = SearchBatcher(retriever, max_queries=256, wait_ms=5.0)
+    batcher = SearchBatcher(retriever, max_queries=256, wait_ms=5.0, stats_path=os.environ.get("RETRIEVER_STATS") or None)
 
     # 3) Launch the server. By default, it listens on http://127.0.0.1:8000
     uvicorn.run(app, host="0.0.0.0", port=args.port)

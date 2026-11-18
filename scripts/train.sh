@@ -26,11 +26,22 @@ SEED=${SEED:-1}
 STEPS=${STEPS:-300}
 BATCH=${BATCH:-64}
 N=${N:-5}
+# Overrides for short measurement runs (LOG 11-18 timing probe): no checkpoint (45 GB), no validation.
+SAVE_FREQ=${SAVE_FREQ:-50}
+TEST_FREQ=${TEST_FREQ:-25}
+VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-True}
 RUN_DIR=/root/autodl-fs/runs/$EXP
 mkdir -p "$RUN_DIR"
 
 VAL="$DATA/val_subset_100.parquet"
 [ -f "$VAL" ] || /root/autodl-tmp/verl/.venv/bin/python "$REPO/scripts/make_val_subset.py" --data "$DATA" --per-ds 100
+# scripts/eval.sh reuses this script with validation only: other val file, dump dir, checkpoint, batch.
+VAL=${VAL_FILE:-$VAL}
+VAL_DIR=${VAL_DIR:-$RUN_DIR/val}
+VAL_BATCH=${VAL_BATCH:-128}
+RESUME_MODE=${RESUME_MODE:-auto}
+RESUME_ARGS=()
+[ -n "${RESUME_FROM:-}" ] && RESUME_ARGS=(trainer.resume_from_path="$RESUME_FROM")   # with RESUME_MODE=resume_path
 
 KL=0.001
 ADV_ARGS=(algorithm.adv_estimator=grpo)
@@ -55,7 +66,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     data.train_files="$DATA/train.parquet" \
     data.val_files="$VAL" \
     data.train_batch_size=$BATCH \
-    data.val_batch_size=128 \
+    data.val_batch_size=$VAL_BATCH \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
@@ -92,21 +103,22 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     trainer.critic_warmup=0 \
-    trainer.val_before_train=True \
+    trainer.val_before_train=$VAL_BEFORE_TRAIN \
     trainer.logger='["console"]' \
     trainer.project_name=search_r1_judge \
     trainer.experiment_name="$EXP" \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=$SAVE_FREQ \
     trainer.max_actor_ckpt_to_keep=1 \
-    trainer.test_freq=25 \
+    trainer.test_freq=$TEST_FREQ \
     trainer.total_training_steps="$STEPS" \
     trainer.default_local_dir="$RUN_DIR/ckpt" \
     trainer.rollout_data_dir="$RUN_DIR/rollouts" \
-    trainer.validation_data_dir="$RUN_DIR/val" \
-    trainer.resume_mode=auto \
+    trainer.validation_data_dir="$VAL_DIR" \
+    trainer.resume_mode=$RESUME_MODE \
     +ray_kwargs.ray_init.object_store_memory=10737418240 \
     ray_kwargs.ray_init.runtime_env.py_executable="uv -v run --frozen --all-packages --extra vllm --extra fsdp" \
     "${ADV_ARGS[@]}" \
+    "${RESUME_ARGS[@]}" \
     "$@"

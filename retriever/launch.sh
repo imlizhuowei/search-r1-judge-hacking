@@ -27,6 +27,9 @@ if [ -z "${INDEX:-}" ]; then
     [ "${USE_FP16_INDEX:-0}" = 1 ] && INDEX="$DATA/e5_SQfp16.index"
 fi
 echo "[$(date +%H:%M:%S)] retriever index: $INDEX" >&2
+# Per-batch timing log (encode / search / load docs, queue wait, query hashes) for the timing measurement
+# (LOG 11-18). Kept on file storage so it survives the instance. RETRIEVER_STATS= (empty) turns it off.
+export RETRIEVER_STATS=${RETRIEVER_STATS-/root/autodl-fs/runs/_retriever_stats/$(date +%m%d_%H%M).jsonl}
 while true; do
 python "$(dirname "$0")/retrieval_server.py" \
   --index_path "$INDEX" \
