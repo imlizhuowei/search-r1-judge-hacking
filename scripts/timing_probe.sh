@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Timing measurement (LOG 11-18): where does one training step's time go?
 #
-# Resumes the GRPO baseline from its last checkpoint and trains 10 more steps (no checkpoint saved, no
-# validation), so the timing is for the late-training regime (long responses, several searches), not step 1.
+# Starts from the GRPO baseline's last checkpoint (merged weights, fresh optimizer: resuming the full checkpoint
+# OOMs, LOG 11-19) and trains 10 steps (no checkpoint saved, no validation), so the timing is for the
+# late-training regime (long responses, several searches), not step 1.
 # verl logs per step: timing_s/gen (rollout incl. waiting for search), timing_s/update_actor, timing_s/ref, ...
 # The retriever logs per batch: encode / faiss search / loading passages, queue wait, query hashes.
 # Output: results/timing_probe_train.json (verl side), results/timing_run_<run>.json (earlier full runs) and results/retriever_probe.json (retriever side + repeat rate).
@@ -18,15 +19,14 @@ LOG=/root/autodl-fs/runs/$EXP/train.log
 cd "$REPO"
 mkdir -p "$(dirname "$LOG")" results
 
-CKPT=$(ls -d /root/autodl-fs/runs/$SRC/ckpt/global_step_* 2>/dev/null | sort -V | tail -1)
-[ -d "${CKPT:-}" ] || { echo "no checkpoint for $SRC"; exit 1; }
-START=$(basename "$CKPT" | sed 's/global_step_//')
+SRC_MODEL=$(bash scripts/merge_ckpt.sh "$SRC") || { echo "no checkpoint for $SRC"; exit 1; }
+START=$(basename "$SRC_MODEL" | sed 's/.*global_step_//')
 STATS=$(ls -t /root/autodl-fs/runs/_retriever_stats/*.jsonl 2>/dev/null | head -1)
 [ -n "$STATS" ] || echo "WARNING: no retriever stats file (retriever started without RETRIEVER_STATS?)"
 
 t0=$(date +%s)
-EXP=$EXP ADV=grpo STEPS=$(( START + PROBE_STEPS )) SAVE_FREQ=-1 TEST_FREQ=-1 VAL_BEFORE_TRAIN=False \
-    RESUME_MODE=resume_path RESUME_FROM="$CKPT" bash scripts/train.sh >> "$LOG" 2>&1
+EXP=$EXP ADV=grpo STEPS=$PROBE_STEPS SAVE_FREQ=-1 TEST_FREQ=-1 VAL_BEFORE_TRAIN=False \
+    RESUME_MODE=disable MODEL="$SRC_MODEL" bash scripts/train.sh >> "$LOG" 2>&1
 rc=$?
 t1=$(date +%s)
 

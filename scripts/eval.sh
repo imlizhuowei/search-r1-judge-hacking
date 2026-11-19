@@ -39,15 +39,12 @@ push() {
 }
 
 if [ "$TAG" = base ]; then
-    RESUME=(RESUME_MODE=disable)
-    EXTRA=()
+    EVAL_MODEL=/root/autodl-tmp/models/Qwen2.5-3B-Instruct
     STEP_DESC="no RL (step 0)"
 else
-    CKPT=${CKPT:-$(ls -d /root/autodl-fs/runs/$TAG/ckpt/global_step_* 2>/dev/null | sort -V | tail -1)}
-    [ -d "${CKPT:-}" ] || { push "评测失败" "找不到 $TAG 的检查点"; exit 1; }
-    RESUME=(RESUME_MODE=resume_path)
-    EXTRA=(trainer.resume_from_path="$CKPT")
-    STEP_DESC="$(basename "$CKPT")"
+    # merged HF weights of the run's latest checkpoint (scripts/merge_ckpt.sh; resume_path OOMs, LOG 11-19)
+    EVAL_MODEL=$(bash scripts/merge_ckpt.sh "$TAG") || { push "评测失败" "$TAG 的检查点合并出错"; exit 1; }
+    STEP_DESC="$(basename "$EVAL_MODEL" | sed "s/^${TAG}_//")"
 fi
 echo "$STEP_DESC" > "$OUT/checkpoint.txt"
 
@@ -66,13 +63,12 @@ for ds in $DATASETS; do
         continue
     fi
     t0=$(date +%s)
-    env "${RESUME[@]}" EXP="eval_${TAG_OUT}_${ds}" ADV=grpo STEPS=1 SAVE_FREQ=-1 TEST_FREQ=-1 VAL_BEFORE_TRAIN=True \
+    env RESUME_MODE=disable MODEL="$EVAL_MODEL" EXP="eval_${TAG_OUT}_${ds}" ADV=grpo STEPS=1 SAVE_FREQ=-1 TEST_FREQ=-1 VAL_BEFORE_TRAIN=True \
         VAL_FILE="$f" VAL_DIR="$OUT/$ds" VAL_BATCH=${VAL_BATCH:-256} \
         bash scripts/train.sh \
             trainer.val_only=True \
             reward.custom_reward_function.path="$REPO/gca/reward.py" \
-            reward.custom_reward_function.name=compute_score \
-            "${EXTRA[@]}" >> "$OUT/eval.log" 2>&1
+            reward.custom_reward_function.name=compute_score >> "$OUT/eval.log" 2>&1
     rc=$?
     n=$(cat "$OUT/$ds"/*.jsonl 2>/dev/null | wc -l)
     if [ $rc -ne 0 ] || [ "$n" = 0 ]; then
