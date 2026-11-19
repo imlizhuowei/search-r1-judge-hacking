@@ -7,7 +7,7 @@ PY=/root/autodl-tmp/verl/.venv/bin/python
 echo "== 现在 $(date '+%m-%d %H:%M')"
 
 if curl -s -m 10 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' \
-        -d '{"queries":["test"],"topk":1}' | grep -q document; then
+        -d '{"queries":["test"],"topk":1}' | grep -q result; then
     echo "== 检索服务：正常"
 else
     echo "== 检索服务：没有响应（刚启动的话要等约 5 分钟加载索引）"
