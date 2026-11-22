@@ -7,6 +7,18 @@ MODEL=${MODEL:-/root/autodl-tmp/models/e5-base-v2}
 # Keep the datasets/Arrow cache off the 30GB system disk.
 # (corpus is read line-by-line via cached byte offsets; no datasets/Arrow cache needed)
 export HF_HOME=${HF_HOME:-/root/autodl-tmp/hf_cache}
+# Threads = the container's CPU quota, not the host's CPU count (LOG 11-22). The A800 container sees 112 CPUs but is
+# allowed 14 (cgroup cpu quota), and the image sets OMP_NUM_THREADS=0 (invalid -> ignored), so faiss/torch started
+# 112 threads: they used up each 100 ms quota in ~12 ms and then all sat throttled, a large slowdown of every search.
+cpu_quota() {
+    local q p
+    if [ -f /sys/fs/cgroup/cpu.max ]; then read -r q p < /sys/fs/cgroup/cpu.max
+    else q=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null); p=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null); fi
+    if [[ "$q" =~ ^[0-9]+$ ]] && [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -gt 0 ]; then echo $(( q / p > 0 ? q / p : 1 )); else nproc; fi
+}
+if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then export OMP_NUM_THREADS=$(cpu_quota); fi
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
+echo "[$(date +%H:%M:%S)] retriever threads: OMP_NUM_THREADS=$OMP_NUM_THREADS" >&2
 # Only ONE retriever ever. A second launch.sh (e.g. started while the first was reloading the index and not
 # answering yet) would load another ~60 GB copy, fail to bind the port, and loop forever re-loading it:
 # that is what pushed the 120 GB container into OOM on 11-04 (two retrievers: 60.6 + 52.3 GB).

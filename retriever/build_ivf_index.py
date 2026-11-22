@@ -35,6 +35,19 @@ from convert_index_fp16 import encode_questions, flat_layout, merge_topk  # noqa
 DATA = "/root/autodl-fs/searchr1"
 
 
+def cpu_quota() -> int:
+    """CPUs the container may use (cgroup quota), not the host's count: the A800 container sees 112, may use 14."""
+    try:
+        if os.path.exists("/sys/fs/cgroup/cpu.max"):
+            q, p = open("/sys/fs/cgroup/cpu.max").read().split()[:2]
+        else:
+            q = open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read().strip()
+            p = open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read().strip()
+        return max(1, int(q) // int(p))
+    except (OSError, ValueError):
+        return os.cpu_count() or 1
+
+
 def recall_at_k(found: np.ndarray, exact: np.ndarray) -> tuple[float, float]:
     """(mean overlap of the top-k sets, share of queries whose top-1 matches)."""
     k = exact.shape[1]
@@ -63,6 +76,8 @@ def main(argv=None):
     import faiss
 
     t0 = time.time()
+    if not os.environ.get("OMP_NUM_THREADS", "").isdigit() or os.environ["OMP_NUM_THREADS"] == "0":
+        faiss.omp_set_num_threads(cpu_quota())    # 112 threads on a 14-CPU quota = constant throttling (LOG 11-22)
     print(f"[threads] faiss uses {faiss.omp_get_max_threads()} threads, os sees {os.cpu_count()} CPUs", flush=True)
     d, ntotal, metric, off = flat_layout(a.src)
     need = ntotal * d * 4 * 1.05 + ntotal * 8
