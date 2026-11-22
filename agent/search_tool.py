@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import time
 from typing import Any, Optional
 from uuid import uuid4
@@ -55,6 +56,10 @@ class SearchTool(BaseTool):
         return instance_id, ToolResponse()
 
     def _post(self, queries: list[str]) -> dict:
+        """Retry only when the request never reached a working server (connection refused while the retriever
+        restarts, 5xx). A read timeout means the server is busy and is STILL working on our request: re-sending it
+        doubles the load (11-22: 66% of the queries the server processed were such duplicates, a retry storm), so a
+        timeout is final. Backoff is exponential with jitter so clients do not retry in lockstep."""
         payload = {"queries": queries, "topk": self.topk, "return_scores": True}
         last_err = None
         for attempt in range(self.max_retries):
@@ -62,9 +67,12 @@ class SearchTool(BaseTool):
                 r = requests.post(self.url, json=payload, timeout=self.timeout)
                 r.raise_for_status()
                 return r.json()
-            except Exception as e:  # network errors, 5xx, bad JSON
+            except requests.exceptions.ReadTimeout as e:
+                raise RuntimeError(f"retrieval timed out after {self.timeout}s (not retried): {e}") from e
+            except Exception as e:  # connection errors, 5xx, bad JSON
                 last_err = e
-                time.sleep(1.0 * (attempt + 1))
+                if attempt + 1 < self.max_retries:
+                    time.sleep(min(30.0, 2.0 ** attempt) * (0.5 + random.random()))
         raise RuntimeError(f"retrieval failed after {self.max_retries} tries: {last_err}")
 
     async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]:

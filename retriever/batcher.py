@@ -60,9 +60,15 @@ class SearchBatcher:
                 by_k.setdefault(it[1], []).append(it)
             for k, group in by_k.items():
                 flat = [q for qs, _, _, _ in group for q in qs]
+                # identical queries in one batch (e.g. 5 rollouts of one question searching the same thing) are
+                # searched once
+                uniq = list(dict.fromkeys(flat))
                 t0 = time.time()
                 try:
-                    res, scores = self.retriever.batch_search(query_list=flat, num=k, return_score=True)
+                    ures, uscores = self.retriever.batch_search(query_list=uniq, num=k, return_score=True)
+                    pos = {q: j for j, q in enumerate(uniq)}
+                    res = [ures[pos[q]] for q in flat]
+                    scores = [uscores[pos[q]] for q in flat]
                     i = 0
                     for qs, _, fut, _ in group:
                         fut.set_result((res[i : i + len(qs)], scores[i : i + len(qs)]))
@@ -83,6 +89,7 @@ class SearchBatcher:
                 "t": round(t0, 3),
                 "n_req": len(group),
                 "n_q": len(flat),
+                "n_unique": len(dict.fromkeys(flat)),
                 "total_s": round(t1 - t0, 4),
                 **{k: round(v, 4) for k, v in split.items()},
                 # how long each request sat in the queue before its batch started (= time a rollout waited)

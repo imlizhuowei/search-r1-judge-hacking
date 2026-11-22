@@ -128,3 +128,42 @@ def test_release_cleans_up(tool):
     run(tool.execute(iid, {"query_list": ["x"]}))
     run(tool.release(iid))
     assert iid not in tool._instances
+
+
+def _fake_requests(monkeypatch, outcomes):
+    """requests.post that raises / returns from `outcomes` in order; records call count."""
+    calls = []
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return fake_result(1)
+
+    def post(url, json=None, timeout=None):
+        calls.append(timeout)
+        o = outcomes[len(calls) - 1]
+        if isinstance(o, Exception):
+            raise o
+        return R()
+
+    monkeypatch.setattr(st.requests, "post", post)
+    monkeypatch.setattr(st.time, "sleep", lambda s: None)
+    return calls
+
+
+def test_read_timeout_is_not_retried(monkeypatch):
+    # 11-22 retry storm: the server keeps working on a timed-out request, so re-sending it only adds load
+    calls = _fake_requests(monkeypatch, [st.requests.exceptions.ReadTimeout("slow")] * 3)
+    t = st.SearchTool({"max_retries": 3, "timeout": 120}, SCHEMA)
+    with pytest.raises(RuntimeError, match="not retried"):
+        t._post(["q"])
+    assert calls == [120]
+
+
+def test_connection_error_is_retried(monkeypatch):
+    # retriever restarting (connection refused) -> retry, then succeed
+    calls = _fake_requests(monkeypatch, [st.requests.exceptions.ConnectionError("refused"), "ok"])
+    t = st.SearchTool({"max_retries": 3}, SCHEMA)
+    assert t._post(["q"])["result"] and len(calls) == 2

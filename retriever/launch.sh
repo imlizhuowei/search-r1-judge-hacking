@@ -25,6 +25,9 @@ fi
 if [ -z "${INDEX:-}" ]; then
     INDEX="$DATA/e5_Flat.index"
     [ "${USE_FP16_INDEX:-0}" = 1 ] && INDEX="$DATA/e5_SQfp16.index"
+    # IVF (approximate) index from retriever/build_ivf_index.py, LOG 11-22: scans ~nprobe/nlist of the corpus per query.
+    # Recall vs Flat is in results/retriever_ivf_check.json; NPROBE= its chosen_nprobe (0 = the value saved in the file).
+    [ "${USE_IVF_INDEX:-0}" = 1 ] && INDEX="$DATA/e5_IVF.index"
 fi
 echo "[$(date +%H:%M:%S)] retriever index: $INDEX" >&2
 # Per-batch timing log (encode / search / load docs, queue wait, query hashes) for the timing measurement
@@ -37,6 +40,7 @@ python "$(dirname "$0")/retrieval_server.py" \
   --topk 3 \
   --retriever_name e5 \
   --retriever_model "$MODEL" \
+  --nprobe "${NPROBE:-0}" \
   --port "${PORT:-8000}"
   rc=$?
   echo "[$(date +%H:%M:%S)] retrieval_server exited with code $rc; restarting in 5 s" >&2

@@ -178,3 +178,38 @@ def test_diagnose_retriever_tells_queueing_from_crash():
     rep = d.diagnose(s)
     assert rep["verdict"].startswith("queueing before") and rep["requests_per_batch"] == 40
     assert rep["batch_time_by_size"][0]["queries_per_batch"] == "65-128"
+
+
+def test_batcher_searches_duplicate_queries_once(tmp_path):
+    class Counting(_FakeRetriever):
+        seen = []
+
+        def batch_search(self, query_list, num, return_score):
+            Counting.seen.append(list(query_list))
+            return super().batch_search(query_list, num, return_score)
+
+    b = SearchBatcher(Counting(), wait_ms=50, stats_path=str(tmp_path / "s.jsonl"))
+    f1, f2 = b.submit(["same q", "other"], 3), b.submit(["same q"], 3)
+    r1, r2 = f1.result(timeout=5), f2.result(timeout=5)
+    assert r1[0][0][0]["document"]["contents"] == "same q" and r1[0][1][0]["document"]["contents"] == "other"
+    assert r2[0][0][0]["document"]["contents"] == "same q"
+    assert sorted(q for batch in Counting.seen for q in batch) == ["other", "same q"]   # searched once each
+
+
+def test_load_test_counts_errors_and_latency():
+    import time as _t
+
+    import load_test_retriever as lt
+
+    def ok(qs, timeout):
+        _t.sleep(0.01)
+        return {"result": [[{}]] * len(qs)}
+
+    rep = lt.run(ok, ["a", "b"], clients=4, seconds=0.3, timeout=1)
+    assert rep["pass"] and rep["errors"] == 0 and rep["latency_s"]["p50"] >= 0.01
+
+    def flaky(qs, timeout):
+        raise TimeoutError()
+
+    rep = lt.run(flaky, ["a"], clients=2, seconds=0.05, timeout=1)
+    assert not rep["pass"] and rep["error_kinds"] == ["TimeoutError"]

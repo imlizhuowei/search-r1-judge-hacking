@@ -4,10 +4,10 @@ tools:
       type: native
       retrieval_service_url: http://127.0.0.1:8000/retrieve
       topk: 3
-      timeout: 30
+      timeout: 120           # 11-22: 30 s + retries caused a retry storm; a timeout is no longer retried
       max_retries: 3
       max_queries_per_call: 4
-      max_concurrency: 64
+      max_concurrency: 32    # in-flight requests per tool instance; the server's thread pool holds 40
     tool_schema:
       type: function
       function:

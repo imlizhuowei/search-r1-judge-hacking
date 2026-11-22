@@ -276,6 +276,10 @@ class DenseRetriever(BaseRetriever):
         print(f"[index] reading {self.index_path} into RAM (64GB, can take 10-20 min)...", flush=True)
         self.index = faiss.read_index(self.index_path)
         print(f"[index] loaded {self.index.ntotal:,} vectors", flush=True)
+        if hasattr(self.index, "nprobe"):   # IVF index (retriever/build_ivf_index.py): lists searched per query
+            if getattr(config, "nprobe", None):
+                self.index.nprobe = config.nprobe
+            print(f"[index] IVF: nlist={self.index.nlist} nprobe={self.index.nprobe}", flush=True)
         assert len(self.corpus) == self.index.ntotal, f"corpus lines {len(self.corpus)} != index size {self.index.ntotal}"
         if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
@@ -467,6 +471,7 @@ if __name__ == "__main__":
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the retriever model."
     )
     parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for computation")
+    parser.add_argument("--nprobe", type=int, default=0, help="IVF index only: lists probed per query (0 = keep the saved value)")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on.")
 
     args = parser.parse_args()
@@ -485,6 +490,7 @@ if __name__ == "__main__":
         retrieval_use_fp16=True,
         retrieval_batch_size=512,
     )
+    config.nprobe = args.nprobe
 
     # 2) Instantiate a global retriever so it is loaded once and reused.
     retriever = get_retriever(config)
