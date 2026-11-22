@@ -64,14 +64,30 @@ def diagnose(recs: list[dict], timeout: float = 30.0, gap_s: float = 60.0, retry
 
     gap_total = sum(g["gap_s"] for g in gaps)
     span = recs[-1]["t"] + recs[-1]["total_s"] - recs[0]["t"]
-    if timed_out / max(n_req, 1) > 0.2 and len(gaps) == 0:
-        verdict = "queueing"
-    elif gaps and timed_out / max(n_req, 1) <= 0.2:
-        verdict = "crash_restart"
-    elif gaps:
-        verdict = "both"
+    busy = sum(r["total_s"] for r in recs)
+    n_req_per_batch = n_req / len(recs)
+    repeat_share = repeats_soon / n_q if n_q else 0.0
+    saturated = busy_minutes >= 0.5 * max(len(timeline), 1)
+    if timed_out / max(n_req, 1) > 0.2:
+        verdict = "queueing (logged queue)"
+    elif saturated and repeat_share > 0.3:
+        verdict = "queueing before the batcher (likely the server's thread pool) + client retries"
+    elif saturated:
+        verdict = "saturated"
     else:
-        verdict = "healthy"
+        verdict = "no overload seen in this log (gaps: idle or restart, check retriever.log)"
+
+    # how batch time grows with batch size: if per-query time falls with size, bigger batches buy throughput
+    buckets = [(1, 16), (17, 64), (65, 128), (129, 256), (257, 10**9)]
+    by_size = []
+    for lo, hi in buckets:
+        rs = [r for r in recs if lo <= r["n_q"] <= hi]
+        if rs:
+            nq = sum(r["n_q"] for r in rs)
+            by_size.append({"queries_per_batch": f"{lo}-{hi if hi < 10**9 else 'up'}", "batches": len(rs),
+                            "batch_s_p50": pct([r["total_s"] for r in rs], 50),
+                            "ms_per_query": round(1000 * sum(r["total_s"] for r in rs) / nq, 1)})
+    split = {k: round(sum(r.get(k, 0.0) for r in recs), 1) for k in ("encode_s", "search_s", "docs_s")}
     return {
         "verdict": verdict,
         "n_batches": len(recs),
@@ -89,6 +105,13 @@ def diagnose(recs: list[dict], timeout: float = 30.0, gap_s: float = 60.0, retry
         "minutes_fully_busy": busy_minutes,
         "minutes": len(timeline),
         "errors": sum(not r.get("ok", True) for r in recs),
+        "requests_per_batch": round(n_req_per_batch, 1),
+        "queries_per_batch": round(n_q / len(recs), 1),
+        "queries_per_s_when_busy": round(n_q / busy, 2) if busy else None,
+        "time_split_share": {k: round(v / busy, 3) if busy else None for k, v in split.items()},
+        "batch_time_by_size": by_size,
+        "slowest_batches": [{"t": r["t"], "n_q": r["n_q"], "total_s": r["total_s"]}
+                            for r in sorted(recs, key=lambda r: -r["total_s"])[:3]],
         "timeline": timeline,
     }
 

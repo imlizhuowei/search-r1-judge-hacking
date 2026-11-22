@@ -163,12 +163,18 @@ def test_diagnose_retriever_tells_queueing_from_crash():
     q = [{"t": 1000 + 10 * i, "n_req": 2, "n_q": 2, "total_s": 10.0, "wait_s": [5.0 * i, 5.0 * i],
           "keys": [f"k{i % 3}", f"x{i}"], "ok": True} for i in range(20)]
     rep = d.diagnose(q)
-    assert rep["verdict"] == "queueing" and rep["n_gaps"] == 0 and rep["queries_repeated_within_window"] > 0
+    assert rep["verdict"].startswith("queueing") and rep["n_gaps"] == 0 and rep["queries_repeated_within_window"] > 0
     # crash: short waits, but a 4-minute hole with no batches
     c = [{"t": 1000 + i, "n_req": 1, "n_q": 1, "total_s": 0.5, "wait_s": [0.1], "keys": [f"a{i}"], "ok": True}
          for i in range(10)]
     c += [{"t": 1250 + i, "n_req": 1, "n_q": 1, "total_s": 0.5, "wait_s": [0.1], "keys": [f"b{i}"], "ok": True}
           for i in range(10)]
     rep = d.diagnose(c)
-    assert rep["verdict"] == "crash_restart" and rep["n_gaps"] == 1 and rep["gaps"][0]["gap_s"] > 200
+    assert rep["verdict"].startswith("no overload") and rep["n_gaps"] == 1 and rep["gaps"][0]["gap_s"] > 200
     assert d.diagnose([])["verdict"] == "no data"
+    # saturated server, tiny logged waits, ~40 requests per batch, lots of repeats -> queue before the batcher
+    s = [{"t": 1000 + 15 * i, "n_req": 40, "n_q": 75, "total_s": 15.0, "wait_s": [0.01] * 40,
+          "keys": [f"k{j % 30}" for j in range(75)], "ok": True} for i in range(40)]
+    rep = d.diagnose(s)
+    assert rep["verdict"].startswith("queueing before") and rep["requests_per_batch"] == 40
+    assert rep["batch_time_by_size"][0]["queries_per_batch"] == "65-128"
