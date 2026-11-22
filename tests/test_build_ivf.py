@@ -55,4 +55,9 @@ def test_build_ivf_refuses_when_recall_too_low(tmp_path):
     with pytest.raises(SystemExit):
         main(["--src", src, "--dst", str(tmp_path / "ivf.index"), "--queries-npy", str(tmp_path / "q.npy"),
               "--nlist", "64", "--nprobes", "1", "--min-recall", "0.99", "--report", str(tmp_path / "r.json")])
-    assert not (tmp_path / "ivf.index").exists()
+    # the index is kept (a 1-hour build is not thrown away); a wider sweep from the saved files passes
+    assert (tmp_path / "ivf.index").exists()
+    main(["--dst", str(tmp_path / "ivf.index"), "--sweep-only", "--nprobes", "1,64", "--min-recall", "0.99",
+          "--report", str(tmp_path / "r.json")])
+    r = json.load(open(tmp_path / "r.json"))
+    assert r["pass"] and r["chosen_nprobe"] == 64 and r["sweep"][0]["topk_overlap"] < 0.99

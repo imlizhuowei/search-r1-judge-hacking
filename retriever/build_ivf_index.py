@@ -10,8 +10,9 @@ How (one pass, reads the Flat file through numpy.memmap like convert_index_fp16.
   2. add every vector in chunks; on each chunk also score N real test questions exactly (float32 inner product),
      keeping the exact top-k = what the Flat index returns;
   3. for each nprobe in --nprobes: search the questions, report recall (overlap with the exact top-k) and time.
-Report: results/retriever_ivf_check.json. The index is written only if some nprobe reaches --min-recall; the chosen
-nprobe (smallest that reaches it) is in the report and must be passed to the server (launch.sh: NPROBE=...).
+Report: results/retriever_ivf_check.json. The index is always written (with the queries and their exact top-k next to
+it, so --sweep-only can try other nprobes in minutes); PASS = some nprobe reaches --min-recall, the smallest such
+nprobe is stored in the file and must be passed to the server (launch.sh: USE_IVF_INDEX=1 NPROBE=...).
 
   /root/autodl-tmp/envs/retriever/bin/python retriever/build_ivf_index.py
 Needs the GPU-mode instance's RAM (~64 GB for the new index + working memory; the no-GPU mode has 2 GB).
@@ -72,8 +73,22 @@ def main(argv=None):
     ap.add_argument("--chunk", type=int, default=500_000)
     ap.add_argument("--report", default="results/retriever_ivf_check.json")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--sweep-only", action="store_true",
+                    help="load --dst (built earlier) and its saved queries / exact top-k, only re-run the sweep")
     a = ap.parse_args(argv)
     import faiss
+    if a.sweep_only:
+        t0 = time.time()
+        if not os.environ.get("OMP_NUM_THREADS", "").isdigit() or os.environ["OMP_NUM_THREADS"] == "0":
+            faiss.omp_set_num_threads(cpu_quota())
+        index = faiss.read_index(a.dst)
+        q, exact = np.load(a.dst + ".queries.npy"), np.load(a.dst + ".exact_top%d.npy" % a.k)
+        print(f"[sweep-only] {a.dst}: {index.ntotal:,} vectors, nlist {index.nlist}, load {time.time() - t0:.0f}s, "
+              f"{faiss.omp_get_max_threads()} threads", flush=True)
+        prev = json.load(open(a.report)) if os.path.exists(a.report) else {}
+        rep = {k: v for k, v in prev.items() if k not in ("sweep", "chosen_nprobe", "pass", "seconds")}
+        rep.update({"dst": a.dst, "nlist": index.nlist, "k": a.k, "n_queries": int(len(q))})
+        return finish(index, q, exact, a, rep, t0)
 
     t0 = time.time()
     if not os.environ.get("OMP_NUM_THREADS", "").isdigit() or os.environ["OMP_NUM_THREADS"] == "0":
@@ -95,6 +110,8 @@ def main(argv=None):
     rng = np.random.default_rng(a.seed)
     sample = np.sort(rng.choice(ntotal, size=n_train, replace=False))
     xt = np.ascontiguousarray(xb[sample])
+    nv = np.linalg.norm(xt[:20000], axis=1)       # IP search on unnormalized vectors clusters worse (11-22 check)
+    norms = {"mean": round(float(nv.mean()), 4), "min": round(float(nv.min()), 4), "max": round(float(nv.max()), 4)}
     quantizer = faiss.IndexFlat(d, metric)
     index = faiss.IndexIVFFlat(quantizer, d, a.nlist, metric)
     tt = time.time()
@@ -119,39 +136,55 @@ def main(argv=None):
     t_add = time.time() - ta
     sizes = np.array([index.invlists.list_size(i) for i in range(a.nlist)])
 
-    # 3. recall / speed per nprobe (time is per 256 queries = the batcher's largest batch)
-    sweep = []
-    for nprobe in [int(x) for x in a.nprobes.split(",")]:
-        index.nprobe = nprobe
-        ts = time.time()
-        _, fi = index.search(q, a.k)
-        dt = time.time() - ts
-        overlap, top1 = recall_at_k(fi, best_i)
-        sweep.append({"nprobe": nprobe, "topk_overlap": round(overlap, 4), "top1_agree": round(top1, 4),
-                      "s_per_256q": round(dt * 256 / len(q), 3), "ms_per_query": round(1000 * dt / len(q), 2)})
-        print(f"[nprobe {nprobe}] overlap={overlap:.4f} top1={top1:.4f} {1000 * dt / len(q):.2f} ms/query", flush=True)
-    ok = [r for r in sweep if r["topk_overlap"] >= a.min_recall]
-    chosen = min(ok, key=lambda r: r["nprobe"]) if ok else None
-
+    # 3. save first (11-22: the first build failed the recall bar and, by design then, threw away a 68-min index);
+    #    the queries and their exact top-k go next to it so later sweeps (--sweep-only) need no Flat pass
+    tmp = a.dst + ".tmp"
+    faiss.write_index(index, tmp)
+    os.replace(tmp, a.dst)
+    np.save(a.dst + ".queries.npy", q)
+    np.save(a.dst + ".exact_top%d.npy" % a.k, best_i)
     rep = {"src": a.src, "dst": a.dst, "ntotal": int(ntotal), "d": int(d), "k": a.k, "n_queries": int(len(q)),
            "nlist": a.nlist, "train_size": int(n_train), "threads": faiss.omp_get_max_threads(),
-           "list_size": {"mean": round(float(sizes.mean()), 1), "max": int(sizes.max()),
-                         "empty": int((sizes == 0).sum())},
-           "train_s": round(t_train), "add_s": round(t_add), "sweep": sweep, "min_recall": a.min_recall,
-           "chosen_nprobe": chosen["nprobe"] if chosen else None, "pass": chosen is not None,
-           # for the write-up: the Flat index on the same machine served ~250 ms/query in batches (LOG 11-22)
-           "seconds": round(time.time() - t0)}
+           "vector_norm": norms, "list_size": {"mean": round(float(sizes.mean()), 1), "max": int(sizes.max()),
+                                               "empty": int((sizes == 0).sum())},
+           "train_s": round(t_train), "add_s": round(t_add)}
+    finish(index, q, best_i, a, rep, t0)
+
+
+def sweep_nprobes(index, q, exact, nprobes, k):
+    """recall / speed per nprobe (time is also given per 256 queries = the batcher's largest batch)"""
+    out = []
+    for nprobe in nprobes:
+        index.nprobe = nprobe
+        ts = time.time()
+        _, fi = index.search(q, k)
+        dt = time.time() - ts
+        overlap, top1 = recall_at_k(fi, exact)
+        out.append({"nprobe": nprobe, "topk_overlap": round(overlap, 4), "top1_agree": round(top1, 4),
+                    "s_per_256q": round(dt * 256 / len(q), 3), "ms_per_query": round(1000 * dt / len(q), 2)})
+        print(f"[nprobe {nprobe}] overlap={overlap:.4f} top1={top1:.4f} {1000 * dt / len(q):.2f} ms/query", flush=True)
+    return out
+
+
+def finish(index, q, exact, a, rep, t0):
+    import faiss
+
+    sweep = sweep_nprobes(index, q, exact, [int(x) for x in a.nprobes.split(",")], a.k)
+    ok = [r for r in sweep if r["topk_overlap"] >= a.min_recall]
+    chosen = min(ok, key=lambda r: r["nprobe"]) if ok else None
+    rep.update({"sweep": sweep, "min_recall": a.min_recall, "chosen_nprobe": chosen["nprobe"] if chosen else None,
+                "pass": chosen is not None, "seconds": round(time.time() - t0)})
     print(json.dumps(rep, indent=1), flush=True)
     os.makedirs(os.path.dirname(os.path.abspath(a.report)), exist_ok=True)
     json.dump(rep, open(a.report, "w"), indent=1)
     if not chosen:
-        sys.exit(f"FAIL: no nprobe in {a.nprobes} reaches top-{a.k} overlap {a.min_recall}; NOT writing the index")
+        sys.exit(f"FAIL: no nprobe in {a.nprobes} reaches top-{a.k} overlap {a.min_recall}. The index is kept at "
+                 f"{a.dst}: try larger nprobes with --sweep-only, do not serve it as is")
     index.nprobe = chosen["nprobe"]
-    tmp = a.dst + ".tmp"
-    faiss.write_index(index, tmp)
-    os.replace(tmp, a.dst)
-    print(f"PASS -> wrote {a.dst} ({os.path.getsize(a.dst) / 2**30:.1f} GiB); start the server with "
-          f"INDEX={a.dst} NPROBE={chosen['nprobe']}")
+    faiss.write_index(index, a.dst + ".tmp")     # store the chosen nprobe in the file
+    os.replace(a.dst + ".tmp", a.dst)
+    print(f"PASS -> {a.dst} ({os.path.getsize(a.dst) / 2**30:.1f} GiB); start the server with "
+          f"USE_IVF_INDEX=1 NPROBE={chosen['nprobe']}")
 
 
 if __name__ == "__main__":
