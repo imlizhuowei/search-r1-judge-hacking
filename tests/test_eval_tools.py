@@ -155,3 +155,20 @@ def test_subset_dump_reuses_full_eval(tmp_path):
     pq.write_table(pa.Table.from_pylist([{"extra_info": {"question": "zzz"}}]), samp)
     assert subset_dump.subset(str(full), str(samp), str(tmp_path / "out2")) == 0
     assert not (tmp_path / "out2").exists()
+
+
+def test_diagnose_retriever_tells_queueing_from_crash():
+    import diagnose_retriever as d
+    # queueing: back-to-back 10 s batches, waits growing past 30 s, the same query coming back ~30 s later
+    q = [{"t": 1000 + 10 * i, "n_req": 2, "n_q": 2, "total_s": 10.0, "wait_s": [5.0 * i, 5.0 * i],
+          "keys": [f"k{i % 3}", f"x{i}"], "ok": True} for i in range(20)]
+    rep = d.diagnose(q)
+    assert rep["verdict"] == "queueing" and rep["n_gaps"] == 0 and rep["queries_repeated_within_window"] > 0
+    # crash: short waits, but a 4-minute hole with no batches
+    c = [{"t": 1000 + i, "n_req": 1, "n_q": 1, "total_s": 0.5, "wait_s": [0.1], "keys": [f"a{i}"], "ok": True}
+         for i in range(10)]
+    c += [{"t": 1250 + i, "n_req": 1, "n_q": 1, "total_s": 0.5, "wait_s": [0.1], "keys": [f"b{i}"], "ok": True}
+          for i in range(10)]
+    rep = d.diagnose(c)
+    assert rep["verdict"] == "crash_restart" and rep["n_gaps"] == 1 and rep["gaps"][0]["gap_s"] > 200
+    assert d.diagnose([])["verdict"] == "no data"
