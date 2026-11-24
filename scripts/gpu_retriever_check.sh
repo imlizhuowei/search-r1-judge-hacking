@@ -30,7 +30,7 @@ say "GPU with retriever: $(nvidia-smi --query-gpu=memory.used,memory.total --for
 
 if curl -s -m 30 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' \
         -d '{"queries":["test"],"topk":1}' | grep -q result; then
-    say "== 3. training trial: ${TRIAL_STEPS:-3} steps, VLLM_MEM=${VLLM_MEM:-0.3} OPTIM_OFFLOAD=${OPTIM_OFFLOAD:-True}"
+    say "== 3. training trial: ${TRIAL_STEPS:-3} steps, VLLM_MEM=${VLLM_MEM:-0.3} OPTIM_OFFLOAD=${OPTIM_OFFLOAD:-True} PARAM_OFFLOAD=${PARAM_OFFLOAD:-False} MICRO_BS=${MICRO_BS:-4}"
     bash -c 'while sleep 10; do nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; done' \
         > /root/autodl-tmp/gpu_trial_mem.txt 2>/dev/null &
     MON=$!

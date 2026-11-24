@@ -31,7 +31,9 @@ SAVE_FREQ=${SAVE_FREQ:-50}
 TEST_FREQ=${TEST_FREQ:-25}
 VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-True}
 # GPU memory knobs (LOG 11-24: the retriever may share the A800, ~33 GB for the fp16 index):
-# VLLM_MEM (vLLM's share of the GPU, default 0.5), OPTIM_OFFLOAD / PARAM_OFFLOAD (FSDP state to CPU RAM, default False)
+# VLLM_MEM (vLLM's share of the GPU, default 0.5), OPTIM_OFFLOAD / PARAM_OFFLOAD (FSDP state to CPU RAM, default False),
+# MICRO_BS (actor micro-batch, default 4; smaller = less activation memory, same gradient: it is accumulated),
+# LOGP_MICRO_BS (log-prob micro-batch for rollout/ref, default 8)
 RUN_DIR=/root/autodl-fs/runs/$EXP
 mkdir -p "$RUN_DIR"
 
@@ -61,6 +63,8 @@ export UV_CACHE_DIR=/root/autodl-tmp/uv_cache
 export HF_HOME=/root/autodl-tmp/hf_cache
 export PYTHONPATH="${REPO}${PYTHONPATH:+:$PYTHONPATH}"
 export NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost
+# fewer fragmentation OOMs when the retriever shares the GPU (LOG 11-24: update_actor OOM with 459 MB reserved-unused)
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
 cd "$VERL"
 uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer.main_ppo \
@@ -84,7 +88,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.actor.ppo_mini_batch_size=32 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${MICRO_BS:-4} \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$KL \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
@@ -95,14 +99,14 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=${VLLM_MEM:-0.5} \
     actor_rollout_ref.rollout.n=$N \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOGP_MICRO_BS:-8} \
     actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
     actor_rollout_ref.rollout.multi_turn.enable=True \
     actor_rollout_ref.rollout.multi_turn.format=hermes \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=5 \
     actor_rollout_ref.rollout.multi_turn.max_tool_response_length=512 \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$REPO/configs/search_tool.yaml" \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOGP_MICRO_BS:-8} \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     trainer.critic_warmup=0 \
     trainer.val_before_train=$VAL_BEFORE_TRAIN \
