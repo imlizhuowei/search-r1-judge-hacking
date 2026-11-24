@@ -33,7 +33,7 @@ VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-True}
 # GPU memory knobs (LOG 11-24: the retriever may share the A800, ~33 GB for the fp16 index):
 # VLLM_MEM (vLLM's share of the GPU, default 0.5), OPTIM_OFFLOAD / PARAM_OFFLOAD (FSDP state to CPU RAM, default False),
 # MICRO_BS (actor micro-batch, default 4; smaller = less activation memory, same gradient: it is accumulated),
-# LOGP_MICRO_BS (log-prob micro-batch for rollout/ref, default 8)
+# LOGP_MICRO_BS (log-prob micro-batch for rollout/ref, default 8), REF_OFFLOAD (reference model to CPU between uses, ~6 GB)
 RUN_DIR=/root/autodl-fs/runs/$EXP
 mkdir -p "$RUN_DIR"
 
@@ -107,7 +107,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     actor_rollout_ref.rollout.multi_turn.max_tool_response_length=512 \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$REPO/configs/search_tool.yaml" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOGP_MICRO_BS:-8} \
-    actor_rollout_ref.ref.fsdp_config.param_offload=False \
+    actor_rollout_ref.ref.fsdp_config.param_offload=${REF_OFFLOAD:-False} \
     trainer.critic_warmup=0 \
     trainer.val_before_train=$VAL_BEFORE_TRAIN \
     trainer.logger='["console"]' \
