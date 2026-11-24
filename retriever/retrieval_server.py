@@ -293,7 +293,8 @@ class DenseRetriever(BaseRetriever):
             # exact search on the GPU in fp16 (retriever/gpu_flat.py, LOG 11-24): CPU Flat tops out at ~7.5 q/s
             from gpu_flat import GpuFlatIndex
             print(f"[index] loading {self.index_path} onto the GPU in fp16 (~32 GB)...", flush=True)
-            self.index = GpuFlatIndex(self.index_path)
+            self.index = GpuFlatIndex(self.index_path,
+                                      idle_offload_s=float(os.environ.get("GPU_INDEX_IDLE_OFFLOAD_S", "0")))
         else:
             print(f"[index] reading {self.index_path} into RAM (64GB, can take 10-20 min)...", flush=True)
             self.index = faiss.read_index(self.index_path)

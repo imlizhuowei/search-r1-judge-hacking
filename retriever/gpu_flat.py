@@ -11,12 +11,18 @@ faiss is CPU-only, so instead of installing faiss-gpu this does the same arithme
     retriever/bench_gpu_search.py measures how often that changes the top-k vs the exact fp32 answer.
 
 Same call as faiss: scores, ids = index.search(queries_float32_numpy, k).
+
+Sharing the GPU with training (LOG 11-24): the trainer's update step needs ~46 GB (fp32 params + grads + Adam)
+and OOMed with the 32 GB index resident, but nothing searches during the update. With idle_offload_s > 0 the
+index moves to a host copy after that many idle seconds (GPU memory freed) and comes back on the next search
+(~30 GB host->GPU copy, a few seconds).
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 
 import numpy as np
@@ -28,7 +34,7 @@ from convert_index_fp16 import flat_layout  # noqa: E402
 
 class GpuFlatIndex:
     def __init__(self, path: str | None = None, device: str = "cuda", chunk_rows: int = 1_000_000,
-                 vectors: np.ndarray | None = None, on_chunk=None, cand: int = 32):
+                 vectors: np.ndarray | None = None, on_chunk=None, cand: int = 32, idle_offload_s: float = 0.0):
         """Load the Flat index file (or `vectors`) onto the GPU in fp16, chunk by chunk.
         on_chunk(base, fp32_chunk_on_gpu) is called for every chunk while it is still fp32 (used for exact checks)."""
         self.device = torch.device(device)
@@ -54,9 +60,59 @@ class GpuFlatIndex:
                 print(f"[gpu-flat] {min(base + chunk_rows, self.ntotal):,}/{self.ntotal:,} on {device} "
                       f"{time.time() - t0:.0f}s", flush=True)
         torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None
+        self.lock = threading.Lock()
+        self.host = None                  # host copy, made on the first offload, kept for reloads
+        self.on_device = True
+        self.last_use = time.time()
+        self.n_offloads = 0
+        self.idle_offload_s = idle_offload_s
+        if idle_offload_s > 0:
+            threading.Thread(target=self._idle_watch, daemon=True).start()
+
+    def offload(self):
+        """Free the GPU copy (the host copy is made once, pinned if possible)."""
+        with self.lock:
+            if not self.on_device:
+                return
+            t0 = time.time()
+            if self.host is None:
+                try:
+                    self.host = torch.empty(self.xb.shape, dtype=self.xb.dtype, pin_memory=self.device.type == "cuda")
+                except RuntimeError:          # pinning 30 GB can fail; pageable memory is slower but works
+                    self.host = torch.empty(self.xb.shape, dtype=self.xb.dtype)
+                self.host.copy_(self.xb)
+            del self.xb
+            self.xb = None
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            self.on_device = False
+            self.n_offloads += 1
+            print(f"[gpu-flat] idle -> index offloaded to host in {time.time() - t0:.1f}s", flush=True)
+
+    def _ensure_on_device(self):
+        if self.on_device:
+            return
+        t0 = time.time()
+        self.xb = self.host.to(self.device, non_blocking=False)
+        self.on_device = True
+        print(f"[gpu-flat] index back on {self.device} in {time.time() - t0:.1f}s", flush=True)
+
+    def _idle_watch(self):
+        while True:
+            time.sleep(min(1.0, self.idle_offload_s / 2))
+            if self.on_device and time.time() - self.last_use > self.idle_offload_s:
+                self.offload()
 
     @torch.no_grad()
     def search(self, q: np.ndarray, k: int):
+        with self.lock:
+            self.last_use = time.time()
+            self._ensure_on_device()
+            out = self._search(q, k)
+            self.last_use = time.time()
+            return out
+
+    def _search(self, q: np.ndarray, k: int):
         q32 = torch.as_tensor(np.ascontiguousarray(q, dtype=np.float32), device=self.device)
         q16 = q32.half()
         cand = max(self.cand, k)

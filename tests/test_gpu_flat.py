@@ -48,3 +48,17 @@ def test_bench_end_to_end(tmp_path):
             "--chunk-rows", "1000", "--batches", "1,16", "--repeat", "1", "--out", str(out)])
     r = json.load(open(out))
     assert r["ntotal"] == 3000 and all(row["topk_overlap"] > 0.95 for row in r["rows"])
+
+
+def test_idle_offload_and_reload():
+    import time
+    x, q = _data(n=2000)
+    idx = GpuFlatIndex(vectors=x, device="cpu", chunk_rows=700, idle_offload_s=0.2)
+    before = idx.search(q, 3)
+    for _ in range(50):
+        if not idx.on_device:
+            break
+        time.sleep(0.05)
+    assert not idx.on_device and idx.xb is None and idx.n_offloads == 1
+    after = idx.search(q, 3)                       # reloads transparently, same answers
+    assert idx.on_device and (after[1] == before[1]).all() and np.allclose(after[0], before[0])
