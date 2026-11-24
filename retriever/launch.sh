@@ -53,6 +53,7 @@ python "$(dirname "$0")/retrieval_server.py" \
   --retriever_name e5 \
   --retriever_model "$MODEL" \
   --nprobe "${NPROBE:-0}" \
+  $([ "${USE_GPU_FLAT:-0}" = 1 ] && echo --gpu_flat) \
   --port "${PORT:-8000}"
   rc=$?
   echo "[$(date +%H:%M:%S)] retrieval_server exited with code $rc; restarting in 5 s" >&2

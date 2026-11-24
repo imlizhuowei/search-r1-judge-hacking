@@ -2,6 +2,7 @@
 # Restart the retriever (threads now from the CPU quota, LOG 11-22) and load-test it, unattended:
 #   bash scripts/measure_retriever.sh                 # Flat index (the paper's), 64 clients x 5 min
 #   USE_IVF_INDEX=1 NPROBE=512 bash scripts/measure_retriever.sh
+#   USE_GPU_FLAT=1 bash scripts/measure_retriever.sh   # exact search on the GPU (retriever/gpu_flat.py)
 #   SHUTDOWN=1 ...                                     # power off at the end
 # Output: results/retriever_load_<tag>.json (load test) and results/retriever_diag_<tag>.json (per-batch log),
 # summary at the end of /root/autodl-tmp/measure_retriever.log.
@@ -11,7 +12,8 @@ RETRIEVER_PY=${RETRIEVER_PY:-/root/autodl-tmp/envs/retriever/bin/python}
 VERL_PY=${VERL_PY:-/root/autodl-tmp/verl/.venv/bin/python}
 CLIENTS=${CLIENTS:-64}
 SECONDS_RUN=${SECONDS_RUN:-300}
-TAG=${TAG:-$([ "${USE_IVF_INDEX:-0}" = 1 ] && echo "ivf_np${NPROBE:-0}" || echo flat)_${CLIENTS}c}
+if [ "${USE_GPU_FLAT:-0}" = 1 ]; then KIND=gpuflat; elif [ "${USE_IVF_INDEX:-0}" = 1 ]; then KIND="ivf_np${NPROBE:-0}"; else KIND=flat; fi
+TAG=${TAG:-${KIND}_${CLIENTS}c}
 cd "$REPO"
 mkdir -p results
 

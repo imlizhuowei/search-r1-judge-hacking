@@ -137,7 +137,7 @@ def test_batcher_writes_stats_and_summary(tmp_path):
 
 
 def test_shell_scripts_parse():
-    for s in ("scripts/eval.sh", "scripts/measure_retriever.sh", "scripts/timing_probe.sh", "scripts/train.sh", "scripts/on_boot.sh",
+    for s in ("scripts/eval.sh", "scripts/gpu_retriever_check.sh", "scripts/measure_retriever.sh", "scripts/timing_probe.sh", "scripts/train.sh", "scripts/on_boot.sh",
               "retriever/launch.sh"):
         subprocess.run(["bash", "-n", os.path.join(ROOT, s)], check=True)
 

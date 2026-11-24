@@ -273,8 +273,14 @@ class DenseRetriever(BaseRetriever):
         super().__init__(config)
         # Load the corpus first so problems with it show up before the slow index read.
         self.corpus = load_corpus(self.corpus_path)
-        print(f"[index] reading {self.index_path} into RAM (64GB, can take 10-20 min)...", flush=True)
-        self.index = faiss.read_index(self.index_path)
+        if getattr(config, "gpu_flat", False):
+            # exact search on the GPU in fp16 (retriever/gpu_flat.py, LOG 11-24): CPU Flat tops out at ~7.5 q/s
+            from gpu_flat import GpuFlatIndex
+            print(f"[index] loading {self.index_path} onto the GPU in fp16 (~32 GB)...", flush=True)
+            self.index = GpuFlatIndex(self.index_path)
+        else:
+            print(f"[index] reading {self.index_path} into RAM (64GB, can take 10-20 min)...", flush=True)
+            self.index = faiss.read_index(self.index_path)
         print(f"[index] loaded {self.index.ntotal:,} vectors", flush=True)
         if hasattr(self.index, "nprobe"):   # IVF index (retriever/build_ivf_index.py): lists searched per query
             if getattr(config, "nprobe", None):
@@ -471,6 +477,8 @@ if __name__ == "__main__":
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the retriever model."
     )
     parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for computation")
+    parser.add_argument("--gpu_flat", action="store_true",
+                        help="exact search on the GPU with torch, vectors in fp16 (~32 GB), see retriever/gpu_flat.py")
     parser.add_argument("--nprobe", type=int, default=0, help="IVF index only: lists probed per query (0 = keep the saved value)")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on.")
 
@@ -491,6 +499,7 @@ if __name__ == "__main__":
         retrieval_batch_size=512,
     )
     config.nprobe = args.nprobe
+    config.gpu_flat = args.gpu_flat
 
     # 2) Instantiate a global retriever so it is loaded once and reused.
     retriever = get_retriever(config)
