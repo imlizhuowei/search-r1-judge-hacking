@@ -33,7 +33,7 @@ VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-True}
 # GPU memory knobs (LOG 11-24: the retriever may share the A800, ~33 GB for the fp16 index):
 # VLLM_MEM (vLLM's share of the GPU, default 0.5), OPTIM_OFFLOAD / PARAM_OFFLOAD (FSDP state to CPU RAM, default False),
 # MICRO_BS (actor micro-batch, default 4; smaller = less activation memory, same gradient: it is accumulated),
-# LOGP_MICRO_BS (log-prob micro-batch for rollout/ref, default 8), REF_OFFLOAD (reference model to CPU between uses, ~6 GB)
+# RAY_OBJ_GB (Ray object store in host RAM, default 10), LOGP_MICRO_BS (log-prob micro-batch for rollout/ref, default 8), REF_OFFLOAD (reference model to CPU between uses, ~6 GB)
 RUN_DIR=/root/autodl-fs/runs/$EXP
 mkdir -p "$RUN_DIR"
 
@@ -123,7 +123,7 @@ uv run --frozen --all-packages --extra vllm --extra fsdp python3 -m verl.trainer
     trainer.rollout_data_dir="$RUN_DIR/rollouts" \
     trainer.validation_data_dir="$VAL_DIR" \
     trainer.resume_mode=$RESUME_MODE \
-    +ray_kwargs.ray_init.object_store_memory=10737418240 \
+    +ray_kwargs.ray_init.object_store_memory=$(( ${RAY_OBJ_GB:-10} * 1073741824 )) \
     ray_kwargs.ray_init.runtime_env.py_executable="uv -v run --frozen --all-packages --extra vllm --extra fsdp" \
     "${ADV_ARGS[@]}" \
     "${RESUME_ARGS[@]}" \

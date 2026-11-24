@@ -19,7 +19,16 @@ cpu_quota() {
 if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then export OMP_NUM_THREADS=$(cpu_quota); fi
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 # With the index on the GPU, passage reads from file storage dominate (LOG 11-24): keep the corpus in RAM (~14 GB).
-[ "${USE_GPU_FLAT:-0}" = 1 ] && export CORPUS_IN_RAM=${CORPUS_IN_RAM:-1}
+# 11-24 update: in RAM it costs 14 GB of the 120 GB host RAM that training also needs (Ray killed a worker at 95%),
+# so when a copy exists on the local system disk (scripts/gpu_retriever_check.sh makes it), read that instead:
+# local SSD reads are fast and the page cache they use is reclaimable.
+CORPUS=${CORPUS:-$DATA/wiki-18.jsonl}
+if [ -f /root/corpus_local/wiki-18.jsonl ] && [ -f /root/corpus_local/wiki-18.offsets.npy ]; then
+    CORPUS=/root/corpus_local/wiki-18.jsonl
+elif [ "${USE_GPU_FLAT:-0}" = 1 ]; then
+    export CORPUS_IN_RAM=${CORPUS_IN_RAM:-1}
+fi
+echo "[$(date +%H:%M:%S)] retriever corpus: $CORPUS (in RAM: ${CORPUS_IN_RAM:-0})" >&2
 # ...and give the GPU back to training while nobody searches (the update step needs ~46 GB; gpu_flat.py)
 [ "${USE_GPU_FLAT:-0}" = 1 ] && export GPU_INDEX_IDLE_OFFLOAD_S=${GPU_INDEX_IDLE_OFFLOAD_S:-5}
 echo "[$(date +%H:%M:%S)] retriever threads: OMP_NUM_THREADS=$OMP_NUM_THREADS" >&2
@@ -52,7 +61,7 @@ export RETRIEVER_STATS=${RETRIEVER_STATS-/root/autodl-fs/runs/_retriever_stats/$
 while true; do
 python "$(dirname "$0")/retrieval_server.py" \
   --index_path "$INDEX" \
-  --corpus_path "$DATA/wiki-18.jsonl" \
+  --corpus_path "$CORPUS" \
   --topk 3 \
   --retriever_name e5 \
   --retriever_model "$MODEL" \

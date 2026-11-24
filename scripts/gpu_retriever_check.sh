@@ -17,6 +17,15 @@ mkdir -p results
 say() { echo "[$(date +%H:%M:%S)] $*"; }
 
 pkill -f retrieval_server; pkill -f retriever/launch.sh; pkill -f verl.trainer.main_ppo; sleep 5
+# local copy of the corpus on the system disk (fast random reads, no 14 GB in RAM; see retriever/launch.sh)
+if [ "${LOCAL_CORPUS:-1}" = 1 ] && [ ! -f /root/corpus_local/wiki-18.offsets.npy ]; then
+    say "copying the corpus to the system disk ($(df -h / | awk 'NR==2{print $4}') free)"
+    mkdir -p /root/corpus_local
+    cp /root/autodl-fs/searchr1/wiki-18.jsonl /root/corpus_local/wiki-18.jsonl.tmp && \
+        mv /root/corpus_local/wiki-18.jsonl.tmp /root/corpus_local/wiki-18.jsonl && \
+        cp /root/autodl-fs/searchr1/wiki-18.offsets.npy /root/corpus_local/ && say "corpus copied" || \
+        { say "corpus copy FAILED"; rm -rf /root/corpus_local; }
+fi
 say "GPU before: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader)"
 
 if [ "${SKIP_BENCH:-0}" = 1 ]; then say "== 1. bench skipped"; else
@@ -31,7 +40,7 @@ say "GPU with retriever: $(nvidia-smi --query-gpu=memory.used,memory.total --for
 if curl -s -m 30 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' \
         -d '{"queries":["test"],"topk":1}' | grep -q result; then
     say "== 3. training trial: ${TRIAL_STEPS:-3} steps, VLLM_MEM=${VLLM_MEM:-0.3} OPTIM_OFFLOAD=${OPTIM_OFFLOAD:-True} PARAM_OFFLOAD=${PARAM_OFFLOAD:-False} MICRO_BS=${MICRO_BS:-4} REF_OFFLOAD=${REF_OFFLOAD:-False}"
-    bash -c 'while sleep 10; do nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; done' \
+    bash -c 'while sleep 10; do echo "$(date +%T) gpu $(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits) host_used $(free -m | awk "NR==2{print \$3}")"; done' \
         > /root/autodl-tmp/gpu_trial_mem.txt 2>/dev/null &
     MON=$!
     rm -rf /root/autodl-fs/runs/gpu_trial
@@ -40,7 +49,8 @@ if curl -s -m 30 -X POST localhost:8000/retrieve -H 'Content-Type: application/j
         bash scripts/train.sh > /root/autodl-tmp/gpu_trial.log 2>&1
     rc=$?
     kill "$MON" 2>/dev/null || true
-    say "training trial exit $rc; GPU peak $(sort -n /root/autodl-tmp/gpu_trial_mem.txt | tail -1) MiB"
+    say "training trial exit $rc; GPU peak $(awk '{print $3}' /root/autodl-tmp/gpu_trial_mem.txt | sort -n | tail -1) MiB, host RAM peak $(awk '{print $5}' /root/autodl-tmp/gpu_trial_mem.txt | sort -n | tail -1) MiB"
+    grep -iE "memory monitor|killed .*memory|OOM" /root/autodl-tmp/gpu_trial.log | head -3
     grep -E "OutOfMemory|out of memory|CUDA error|Error|error:" /root/autodl-tmp/gpu_trial.log | grep -v "Search error" | tail -8
     grep -oE "step:[0-9]+ .*timing_s/step:[0-9.]+" /root/autodl-tmp/gpu_trial.log 2>/dev/null \
         | grep -oE "step:[0-9]+|timing_s/(gen|update_actor|step):[0-9.]+" | paste -sd' ' | sed 's/ step:/\nstep:/g'
