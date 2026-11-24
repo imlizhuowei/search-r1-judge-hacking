@@ -18,6 +18,8 @@ cpu_quota() {
 }
 if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then export OMP_NUM_THREADS=$(cpu_quota); fi
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
+# With the index on the GPU, passage reads from file storage dominate (LOG 11-24): keep the corpus in RAM (~14 GB).
+[ "${USE_GPU_FLAT:-0}" = 1 ] && export CORPUS_IN_RAM=${CORPUS_IN_RAM:-1}
 echo "[$(date +%H:%M:%S)] retriever threads: OMP_NUM_THREADS=$OMP_NUM_THREADS" >&2
 # Only ONE retriever ever. A second launch.sh (e.g. started while the first was reloading the index and not
 # answering yet) would load another ~60 GB copy, fail to bind the port, and loop forever re-loading it:

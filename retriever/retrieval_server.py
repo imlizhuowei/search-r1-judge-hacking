@@ -82,13 +82,29 @@ class LineCorpus:
                 break
             self.offsets = self.offsets[:-1]
             print(f"[corpus] dropped a junk trailing line ({len(tail):,} bytes of whitespace/NUL)", flush=True)
+        # CORPUS_IN_RAM=1 (LOG 11-24): with search on the GPU, reading the 3 passages per query from file storage
+        # became 99.6% of the retriever's time (~0.35 s per query, network-disk latency per pread). Reading the
+        # whole file into memory once (~14 GB, a few minutes) makes a passage a memory slice.
+        self.buf = None
+        if os.environ.get("CORPUS_IN_RAM", "0") == "1":
+            t0 = time.time()
+            size = int(self.offsets[-1])
+            self.buf = bytearray(size)
+            view, done = memoryview(self.buf), 0
+            with open(corpus_path, "rb", buffering=0) as f:
+                while done < size:
+                    n = f.readinto(view[done:done + (1 << 26)])
+                    if not n:
+                        break
+                    done += n
+            print(f"[corpus] {done / 2**30:.1f} GiB read into RAM in {time.time() - t0:.0f}s", flush=True)
 
     def __len__(self):
         return len(self.offsets) - 1
 
     def __getitem__(self, i: int) -> dict:
         start, end = int(self.offsets[i]), int(self.offsets[i + 1])
-        raw = os.pread(self.fd, end - start, start)
+        raw = bytes(self.buf[start:end]) if self.buf is not None else os.pread(self.fd, end - start, start)
         try:
             return json.loads(raw)
         except ValueError:

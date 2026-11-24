@@ -36,6 +36,6 @@ else
     echo "[$(date +%H:%M:%S)] ready after $((i * 15 / 60)) min; $(grep -m1 'retriever threads' /root/autodl-tmp/retriever.log)"
     $VERL_PY scripts/load_test_retriever.py --clients "$CLIENTS" --seconds "$SECONDS_RUN" \
         --out "results/retriever_load_${TAG}.json"
-    $VERL_PY scripts/diagnose_retriever.py "$STATS" --out "results/retriever_diag_${TAG}.json" | head -60
+    $VERL_PY scripts/diagnose_retriever.py "$STATS" --out "results/retriever_diag_${TAG}.json" | head -60 || true
 fi
 [ "${SHUTDOWN:-0}" = 1 ] && /usr/bin/shutdown

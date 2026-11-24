@@ -19,8 +19,10 @@ say() { echo "[$(date +%H:%M:%S)] $*"; }
 pkill -f retrieval_server; pkill -f retriever/launch.sh; pkill -f verl.trainer.main_ppo; sleep 5
 say "GPU before: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader)"
 
-say "== 1. bench"
-$RPY retriever/bench_gpu_search.py || say "bench FAILED (exit $?)"
+if [ "${SKIP_BENCH:-0}" = 1 ]; then say "== 1. bench skipped"; else
+    say "== 1. bench"
+    $RPY retriever/bench_gpu_search.py || say "bench FAILED (exit $?)"
+fi
 
 say "== 2. retriever on GPU + load test"
 SHUTDOWN=0 USE_GPU_FLAT=1 bash scripts/measure_retriever.sh || say "load test FAILED (exit $?)"
@@ -29,7 +31,7 @@ say "GPU with retriever: $(nvidia-smi --query-gpu=memory.used,memory.total --for
 if curl -s -m 30 -X POST localhost:8000/retrieve -H 'Content-Type: application/json' \
         -d '{"queries":["test"],"topk":1}' | grep -q result; then
     say "== 3. training trial: ${TRIAL_STEPS:-3} steps, VLLM_MEM=${VLLM_MEM:-0.3} OPTIM_OFFLOAD=${OPTIM_OFFLOAD:-True}"
-    ( while sleep 10; do nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; done ) \
+    bash -c 'while sleep 10; do nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; done' \
         > /root/autodl-tmp/gpu_trial_mem.txt 2>/dev/null &
     MON=$!
     rm -rf /root/autodl-fs/runs/gpu_trial
@@ -37,9 +39,9 @@ if curl -s -m 30 -X POST localhost:8000/retrieve -H 'Content-Type: application/j
         VLLM_MEM=${VLLM_MEM:-0.3} OPTIM_OFFLOAD=${OPTIM_OFFLOAD:-True} PARAM_OFFLOAD=${PARAM_OFFLOAD:-False} \
         bash scripts/train.sh > /root/autodl-tmp/gpu_trial.log 2>&1
     rc=$?
-    kill $MON 2>/dev/null
+    kill "$MON" 2>/dev/null || true
     say "training trial exit $rc; GPU peak $(sort -n /root/autodl-tmp/gpu_trial_mem.txt | tail -1) MiB"
-    grep -E "OutOfMemory|out of memory|CUDA error" /root/autodl-tmp/gpu_trial.log | head -3
+    grep -E "OutOfMemory|out of memory|CUDA error|Error|error:" /root/autodl-tmp/gpu_trial.log | grep -v "Search error" | tail -8
     grep -oE "step:[0-9]+ .*timing_s/step:[0-9.]+" /root/autodl-tmp/gpu_trial.log 2>/dev/null \
         | grep -oE "step:[0-9]+|timing_s/(gen|update_actor|step):[0-9.]+" | paste -sd' ' | sed 's/ step:/\nstep:/g'
     python3 scripts/summarize_timing.py /root/autodl-tmp/gpu_trial.log /dev/null gpu_trial > /dev/null 2>&1 || true
